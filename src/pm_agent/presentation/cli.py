@@ -32,6 +32,7 @@ from pm_agent.project import (
 )
 from pm_agent.prompts import PromptBuilder, ResponseParser
 
+
 def _print_err(msg: str) -> None:
     Console(stderr=True).print(f"[bold red]error:[/] {msg}")
 
