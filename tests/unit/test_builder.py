@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from pm_agent.prompts.builder import PromptBuilder
 
 
@@ -70,7 +68,6 @@ def test_build_includes_context_section(tmp_path):
     (context_dir / "plan.md").write_text("# UniquePlanningPhrase")
     builder = PromptBuilder(str(context_dir))
     from pm_agent.domain.models import ContextPacket, Project
-    from pm_agent.ports.memory import RetrievalQuery
     project = Project(
         id="p1", name="test", canonical_path=str(tmp_path),
         repo_fingerprint="abc", default_branch="main",
@@ -96,3 +93,35 @@ def test_build_omits_context_section_when_empty(monkeypatch, tmp_path):
     messages = builder.build(project, "main", packet, "hello")
     system_content = messages[0]["content"]
     assert "## Project Specifications" not in system_content
+
+
+def test_build_injects_project_memory_section(tmp_path):
+    memory = "# Project Memory\nThis is the pm-agent project. Stack: Python."
+    builder = PromptBuilder(None, memory=memory)
+    from pm_agent.domain.models import ContextPacket, Project
+    project = Project(
+        id="p1", name="pm-agent", canonical_path=str(tmp_path),
+        repo_fingerprint="abc", default_branch="main",
+        created_at="now", updated_at="now",
+    )
+    packet = ContextPacket(items=[], recent_messages=[], repository_snapshot=None)
+    messages = builder.build(project, "main", packet, "hello")
+    system_content = messages[0]["content"]
+    assert "## Project Memory" in system_content
+    assert "This is the pm-agent project" in system_content
+
+
+def test_build_injects_configured_project_name_and_remote(tmp_path):
+    builder = PromptBuilder(None, memory="", project_meta={"name": "pm-agent", "remote": "git@x:o/r.git"})
+    from pm_agent.domain.models import ContextPacket, Project
+    project = Project(
+        id="p1", name="folder-name", canonical_path=str(tmp_path),
+        repo_fingerprint="abc", default_branch="main",
+        created_at="now", updated_at="now",
+    )
+    packet = ContextPacket(items=[], recent_messages=[], repository_snapshot=None)
+    messages = builder.build(project, "main", packet, "hello")
+    system_content = messages[0]["content"]
+    assert "Configured name: pm-agent" in system_content
+    assert "Remote: git@x:o/r.git" in system_content
+

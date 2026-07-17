@@ -47,6 +47,12 @@ GITHUB_ACTIONS: dict[str, GitHubAction] = {
     "create_issue": GitHubAction("create_issue", "write", frozenset({Capability.WRITE_ISSUES})),
     "update_issue": GitHubAction("update_issue", "write", frozenset({Capability.WRITE_ISSUES})),
     "create_issues": GitHubAction("create_issues", "write", frozenset({Capability.WRITE_ISSUES})),
+    "create_issue_comment": GitHubAction(
+        "create_issue_comment", "write", frozenset({Capability.WRITE_ISSUES})
+    ),
+    "create_sub_issue": GitHubAction(
+        "create_sub_issue", "write", frozenset({Capability.WRITE_ISSUES})
+    ),
     "setup_sprint": GitHubAction("setup_sprint", "write", frozenset({Capability.WRITE_MILESTONES})),
     "add_issue_to_project": GitHubAction("add_issue_to_project", "write", frozenset({Capability.WRITE_PROJECTS})),
     "create_project": GitHubAction("create_project", "write", frozenset({Capability.WRITE_PROJECTS})),

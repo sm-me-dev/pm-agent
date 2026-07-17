@@ -71,7 +71,10 @@ def test_recent_message_window_is_capped_at_100(tmp_path):
     assert messages[0].content == "message 20"
 
 
-def test_unaccepted_decision_is_not_retrieved(tmp_path):
+def test_proposed_decision_is_retrieved_as_identity(tmp_path):
+    # Proposed (not-yet-accepted) decisions are the bulk of product-manager
+    # state; they must be surfaced as project-identity context so the agent
+    # recovers prior intent instead of asking "what is the project?" again.
     store = make_store(tmp_path)
     project = store.resolve_project(tmp_path)
     session = store.start_session(project.id, "s", "m", "p", "unknown")
@@ -83,8 +86,11 @@ def test_unaccepted_decision_is_not_retrieved(tmp_path):
         "Use Postgres.",
         "Potential future scale.",
     )
-    packet = store.retrieve(RetrievalQuery(project.id, session.id, "Postgres database"))
-    assert not packet.items
+    packet = store.retrieve(RetrievalQuery(project.id, session.id, "unrelated input"))
+    assert any(
+        item.kind.value == "decision" and "Postgres" in item.content
+        for item in packet.items
+    )
 
 
 def test_action_approval_is_payload_specific(tmp_path):

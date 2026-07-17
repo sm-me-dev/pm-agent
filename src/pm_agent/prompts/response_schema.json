@@ -10,6 +10,25 @@
     "actions_requiring_approval"
   ],
   "properties": {
+    "execution_needs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification"],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": [
+            "agent_executable",
+            "agent_executable_with_assumptions",
+            "user_decision_required",
+            "external_access_required"
+          ]
+        },
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "open_questions": {"type": "array", "items": {"type": "string"}},
+        "missing_access": {"type": "array", "items": {"type": "string"}}
+      }
+    },
     "summary": {"type": "string"},
     "analysis": {"type": "string"},
     "risks": {"type": "array", "maxItems": 12, "items": {"type": "string"}},

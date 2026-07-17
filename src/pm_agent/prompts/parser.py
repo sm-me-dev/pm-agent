@@ -3,8 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pm_agent.domain.enums import ActionType, DecisionStatus
-from pm_agent.domain.models import ActionCandidate, DecisionCandidate, PMResponse
+from pm_agent.domain.enums import ActionType, DecisionStatus, TaskClass
+from pm_agent.domain.models import (
+    ActionCandidate,
+    DecisionCandidate,
+    ExecutionNeeds,
+    PMResponse,
+)
 
 
 class ResponseValidationError(ValueError):
@@ -20,6 +25,7 @@ class ResponseParser:
         "decisions",
         "actions_requiring_approval",
     }
+    _OPTIONAL = {"execution_needs"}
 
     def parse(self, raw_response: str) -> PMResponse:
         try:
@@ -29,7 +35,7 @@ class ResponseParser:
         if not isinstance(data, dict):
             raise ResponseValidationError("Response must be a JSON object.")
         missing = self._REQUIRED - data.keys()
-        extra = data.keys() - self._REQUIRED
+        extra = data.keys() - (self._REQUIRED | self._OPTIONAL)
         if missing or extra:
             raise ResponseValidationError(
                 f"Missing fields: {sorted(missing)}; unexpected fields: {sorted(extra)}"
@@ -45,6 +51,9 @@ class ResponseParser:
                 data["actions_requiring_approval"], "actions_requiring_approval"
             )
         ]
+        execution_needs = None
+        if "execution_needs" in data:
+            execution_needs = self._execution_needs(data["execution_needs"])
         return PMResponse(
             summary=summary,
             analysis=analysis,
@@ -52,6 +61,29 @@ class ResponseParser:
             recommendations=recommendations,
             decisions=decisions,
             actions_requiring_approval=actions,
+            execution_needs=execution_needs,
+        )
+
+    def _execution_needs(self, value: Any) -> ExecutionNeeds:
+        item = self._object(value, "execution_needs")
+        raw_class = self._string(item.get("classification", ""), "execution_needs.classification")
+        try:
+            classification = TaskClass(raw_class)
+        except ValueError as exc:
+            valid = ", ".join(e.value for e in TaskClass)
+            raise ResponseValidationError(
+                f"execution_needs.classification must be one of [{valid}]; "
+                f"got '{raw_class}'"
+            ) from exc
+        return ExecutionNeeds(
+            classification=classification,
+            assumptions=self._string_list(item.get("assumptions", []), "execution_needs.assumptions"),
+            open_questions=self._string_list(
+                item.get("open_questions", []), "execution_needs.open_questions"
+            ),
+            missing_access=self._string_list(
+                item.get("missing_access", []), "execution_needs.missing_access"
+            ),
         )
 
     def _decision(self, value: Any) -> DecisionCandidate:

@@ -265,6 +265,16 @@ class ActionPolicy:
                     "add_issue_to_project requires positive issue_numbers and a project "
                     "number or title."
                 )
+        elif operation == "create_issue_comment":
+            if not isinstance(payload.get("issue_number"), int) or payload["issue_number"] <= 0:
+                return "create_issue_comment requires a positive integer issue_number."
+            if not populated_string(payload.get("body")):
+                return "create_issue_comment requires an exact comment body."
+        elif operation == "create_sub_issue":
+            if not isinstance(payload.get("parent"), int) or payload["parent"] <= 0:
+                return "create_sub_issue requires a positive integer parent issue number."
+            if not populated_string(payload.get("title")):
+                return "create_sub_issue requires an exact sub-issue title."
         return None
 
     def _evaluate_mcp(
@@ -275,6 +285,16 @@ class ActionPolicy:
             "filesystem", "git", "memory", "graphify", "sequential_thinking", "github"
         }:
             return PolicyDecision(False, "blocked", "Unknown MCP category.")
+        if operation == "write_document":
+            if "path" not in payload or "content" not in payload:
+                return PolicyDecision(
+                    False,
+                    "blocked",
+                    "write_document requires 'path' and 'content' in payload.",
+                )
+            return PolicyDecision(
+                True, "medium", "Sandboxed document write (repo-relative) requires approval."
+            )
         if normalized in {"filesystem", "git", "github"} and any(
             word in operation for word in _WRITE_OPERATIONS
         ):
