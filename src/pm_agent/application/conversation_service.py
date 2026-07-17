@@ -4,7 +4,13 @@ import logging
 from dataclasses import replace
 
 from pm_agent.domain.enums import ActionStatus, DecisionStatus
-from pm_agent.domain.models import PMResponse, canonical_json
+from pm_agent.domain.models import (
+    PMResponse,
+    action_fingerprint,
+    canonical_json,
+    decision_fingerprint,
+    payload_hash,
+)
 from pm_agent.ports.memory import RetrievalQuery
 from pm_agent.ports.model import ModelEventHandler, ModelRequest
 from pm_agent.prompts.parser import ResponseValidationError
@@ -98,6 +104,19 @@ class ConversationService:
         approved_candidates = []
         blocked_operations: list[str] = []
         for decision in response.decisions:
+            fingerprint = decision_fingerprint(
+                decision.topic, decision.title, decision.decision
+            )
+            existing = self.store.find_decision_in_session(
+                project.id, session.id, fingerprint
+            )
+            if existing is not None:
+                logger.debug(
+                    "suppressing duplicate decision proposal (fingerprint=%s, existing_status=%s)",
+                    fingerprint,
+                    existing.status.value,
+                )
+                continue
             self.store.add_decision(
                 project.id,
                 session.id,
@@ -106,8 +125,24 @@ class ConversationService:
                 decision.decision,
                 decision.reason,
                 status=DecisionStatus.PROPOSED,
+                fingerprint=fingerprint,
             )
         for candidate in response.actions_requiring_approval:
+            fingerprint = action_fingerprint(
+                candidate.action_type.value,
+                candidate.operation,
+                payload_hash(candidate.payload),
+            )
+            existing = self.store.find_action_in_session(
+                project.id, session.id, fingerprint
+            )
+            if existing is not None:
+                logger.debug(
+                    "suppressing duplicate action proposal (fingerprint=%s, existing_status=%s)",
+                    fingerprint,
+                    existing.status.value,
+                )
+                continue
             proposal = self.action_service.propose(project.id, session.id, candidate)
             if proposal.status is ActionStatus.PROPOSED:
                 stored_actions.append(proposal)

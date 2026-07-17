@@ -190,6 +190,7 @@ class SQLiteStore:
         reason: str,
         status: DecisionStatus = DecisionStatus.PROPOSED,
         supersedes_id: str | None = None,
+        fingerprint: str = "",
     ) -> Decision:
         now = utc_now()
         item = Decision(
@@ -204,6 +205,7 @@ class SQLiteStore:
             supersedes_id=supersedes_id,
             created_at=now,
             updated_at=now,
+            fingerprint=fingerprint,
         )
         with self.factory.connect() as connection:
             if supersedes_id:
@@ -214,9 +216,9 @@ class SQLiteStore:
                 )
             connection.execute(
                 """INSERT INTO decisions_v2
-                   (id, project_id, session_id, topic, title, decision, reason, status,
-                    supersedes_id, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (id, project_id, session_id, topic, title, decision, reason, status,
+                     supersedes_id, created_at, updated_at, fingerprint)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     item.id,
                     item.project_id,
@@ -229,6 +231,7 @@ class SQLiteStore:
                     item.supersedes_id,
                     item.created_at,
                     item.updated_at,
+                    item.fingerprint,
                 ),
             )
             self._index_memory(
@@ -242,6 +245,25 @@ class SQLiteStore:
                 item.status.value,
             )
         return item
+
+    def find_decision_in_session(
+        self, project_id: str, session_id: str, fingerprint: str
+    ) -> Decision | None:
+        """Return the most recent decision with the same fingerprint in this session.
+
+        Used to suppress re-prompting for a decision the model re-proposes
+        on a later REPL loop iteration after it was already resolved.
+        """
+        if not fingerprint:
+            return None
+        with self.factory.connect() as connection:
+            row = connection.execute(
+                """SELECT * FROM decisions_v2
+                   WHERE project_id = ? AND session_id = ? AND fingerprint = ?
+                   ORDER BY updated_at DESC LIMIT 1""",
+                (project_id, session_id, fingerprint),
+            ).fetchone()
+        return self._decision(row) if row else None
 
     def set_decision_status(
         self, decision_id: str, project_id: str, status: DecisionStatus
@@ -405,10 +427,10 @@ class SQLiteStore:
         with self.factory.connect() as connection:
             connection.execute(
                 """INSERT INTO action_proposals
-                   (id, project_id, session_id, action_type, tool_category, operation,
-                    reason, impact, payload_json, payload_sha256, risk_level, status,
-                    created_at, expires_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (id, project_id, session_id, action_type, tool_category, operation,
+                     reason, impact, payload_json, payload_sha256, risk_level, status,
+                     created_at, expires_at, fingerprint)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     proposal.id,
                     proposal.project_id,
@@ -424,11 +446,31 @@ class SQLiteStore:
                     proposal.status.value,
                     proposal.created_at,
                     proposal.expires_at,
+                    proposal.fingerprint,
                 ),
             )
             self._append_action_event(
                 connection, proposal.id, "proposed", "agent", {"risk": proposal.risk_level}
             )
+
+    def find_action_in_session(
+        self, project_id: str, session_id: str, fingerprint: str
+    ) -> ActionProposal | None:
+        """Return the most recent action proposal with the same fingerprint in this session.
+
+        Used to suppress re-prompting for an action the model re-proposes
+        on a later REPL loop iteration after it was already resolved.
+        """
+        if not fingerprint:
+            return None
+        with self.factory.connect() as connection:
+            row = connection.execute(
+                """SELECT * FROM action_proposals
+                   WHERE project_id = ? AND session_id = ? AND fingerprint = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (project_id, session_id, fingerprint),
+            ).fetchone()
+        return self._action(row) if row else None
 
     def get_action(self, action_id: str) -> ActionProposal | None:
         with self.factory.connect() as connection:
@@ -965,6 +1007,7 @@ class SQLiteStore:
             supersedes_id=row["supersedes_id"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            fingerprint=row["fingerprint"] if "fingerprint" in row else "",
         )
 
     @staticmethod
@@ -997,6 +1040,7 @@ class SQLiteStore:
             status=ActionStatus(row["status"]),
             created_at=row["created_at"],
             expires_at=row["expires_at"],
+            fingerprint=row["fingerprint"] if "fingerprint" in row else "",
         )
 
     @staticmethod

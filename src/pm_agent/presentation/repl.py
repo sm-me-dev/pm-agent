@@ -86,6 +86,8 @@ class PMAgentREPL:
         self._completer = PMCompleter(self._file_index)
         self.input = InteractiveInput(completer=self._completer)
 
+        self._presented_decision_ids: set[str] = set()
+
         if always_approve:
             self._install_always_approve_rules()
 
@@ -315,12 +317,17 @@ class PMAgentREPL:
         return "\n---\n".join(events)
 
     def _resolve_pending_decisions(self) -> str:
-        decisions = self.services.store.list_decisions(
-            self.project.id,
-            statuses=(DecisionStatus.PROPOSED,),
-        )
+        decisions = [
+            d
+            for d in self.services.store.list_decisions(
+                self.project.id,
+                statuses=(DecisionStatus.PROPOSED,),
+            )
+            if d.id not in self._presented_decision_ids
+        ]
         if not decisions:
             return ""
+        self._presented_decision_ids.update(d.id for d in decisions)
         self.console.print()
         self.console.print(decision_table(decisions))
         events: list[str] = []

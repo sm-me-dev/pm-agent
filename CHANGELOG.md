@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.9 (2026-07-17)
+
+### Fixed
+- Stopped the agent from re-prompting for the same decision or action on every REPL loop iteration. Decisions and action proposals are now deduplicated within a session by a stable fingerprint (topic/title/decision for decisions; action type/operation/payload hash for actions), so already-proposed or already-resolved items are not re-created or re-asked.
+- Skipped decisions are no longer re-shown every loop: the REPL tracks which pending decisions it has already presented this session and does not re-list them.
+
+### Added
+- `decision_fingerprint()` and `action_fingerprint()` helpers in `pm_agent.domain.models`.
+- `fingerprint` column on `decisions_v2` and `action_proposals` (migration 004).
+- `SQLiteStore.find_decision_in_session()` and `SQLiteStore.find_action_in_session()` for idempotent proposal lookups.
+- Debug logging when a duplicate decision or action proposal is suppressed.
+
 ## 0.3.8 (2026-07-17)
 
 ### Fixed

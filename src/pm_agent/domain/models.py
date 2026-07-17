@@ -27,6 +27,26 @@ def payload_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode()).hexdigest()
 
 
+def decision_fingerprint(topic: str, title: str, decision: str) -> str:
+    """Stable identity for a model-proposed decision.
+
+    Used to detect the same decision re-proposed across REPL loop
+    iterations so we do not prompt the user again.
+    """
+    parts = [topic.strip().lower(), title.strip().lower(), decision.strip().lower()]
+    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
+
+
+def action_fingerprint(action_type: str, operation: str, payload_sha256: str) -> str:
+    """Stable identity for an approval-worthy action proposal.
+
+    Combines the action type, operation, and payload hash so repeated
+    proposals of the same action in a session are recognized.
+    """
+    parts = [action_type.strip().lower(), operation.strip().lower(), payload_sha256]
+    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class Project:
     id: str
@@ -74,6 +94,7 @@ class Decision:
     created_at: str
     updated_at: str
     supersedes_id: str | None = None
+    fingerprint: str = ""
 
 
 @dataclass(frozen=True)
@@ -143,6 +164,7 @@ class ActionProposal:
     status: ActionStatus
     created_at: str
     expires_at: str | None = None
+    fingerprint: str = ""
 
 
 @dataclass(frozen=True)

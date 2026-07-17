@@ -19,6 +19,7 @@ def apply_migrations(connection: sqlite3.Connection) -> None:
         (1, "initial", "001_initial.sql"),
         (2, "legacy_import_tracking", "002_legacy_import_tracking.sql"),
         (3, "approval_rules", "003_approval_rules.sql"),
+        (4, "decision_action_fingerprints", "004_decision_action_fingerprints.sql"),
     ]
     for version, name, filename in migrations:
         if version in applied:
