@@ -5,6 +5,7 @@ from typing import Any
 
 from openai import APIConnectionError, OpenAI
 
+from pm_agent.application.conversation_service import ConnectionError
 from pm_agent.ports.model import (
     ModelEventHandler,
     ModelRequest,

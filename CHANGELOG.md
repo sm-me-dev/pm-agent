@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4 (2026-07-17)
+
+### Fixed
+- Connection errors now raise the correct custom `ConnectionError` type so the REPL handler catches them properly (was raising built-in `ConnectionError` which bypassed the specific handler).
+
 ## 0.3.3 (2026-07-17)
 
 ### Fixed
