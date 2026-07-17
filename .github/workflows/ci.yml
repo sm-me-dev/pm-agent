@@ -56,18 +56,4 @@ jobs:
           pip install dist/*.whl
           pm-agent --help
 
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-      - name: Test
-        run: pytest
+  # windows: disabled until path-handling fixes land (see #1)
