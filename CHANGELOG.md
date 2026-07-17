@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 (2026-07-17)
+
+### Fixed
+- Connection errors from model provider (e.g. "Connection reset by peer") are now caught and displayed as a clear "Model Connection Error" instead of a generic "Request failed" message.
+- `pm-agent migrate` is now idempotent — rerunning it no longer fails with `IntegrityError: UNIQUE constraint failed` on `action_outcomes`.
+
 ## 0.3.2 (2026-07-17)
 
 ### Fixed
