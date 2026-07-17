@@ -5,15 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from pm_agent.presentation.cli import main, _COMMANDS
+from pm_agent.presentation.cli import main
 
 
 class TestEntrypoints:
     def test_help_exits_zero(self):
-        try:
-            main(["--help"])
-        except SystemExit as exc:
-            assert exc.code == 0
+        assert main(["--help"]) == 0
 
     def test_module_help(self):
         import subprocess
@@ -27,9 +24,9 @@ class TestEntrypoints:
         try:
             main(["nonexistent"])
         except SystemExit as exc:
-            assert exc.code == 2  # argparse error code
+            assert exc.code == 2
 
-    @pytest.mark.parametrize("cmd", sorted(_COMMANDS))
+    @pytest.mark.parametrize("cmd", ["init", "repl", "status", "doctor", "spec", "memory", "migrate"])
     def test_all_commands_recognized(self, cmd):
         assert cmd in {"init", "repl", "status", "doctor", "spec", "memory", "migrate"}
 
