@@ -1,0 +1,15 @@
+# Normalize line endings to LF on check-in, keep OS default on checkout
+* text=auto eol=lf
+
+# Explicitly declare binary files
+*.png binary
+*.jpg binary
+*.ico binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.db-journal binary
+
+# Generated / vendored — diff off
+*.min.js -diff
+*.min.css -diff

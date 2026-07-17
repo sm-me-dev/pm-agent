@@ -1,45 +1,101 @@
 # PM-Agent
 
 **Stateful Technical PM Agent** — a CLI tool that brings persistent project-management
-context to AI-assisted development. It maintains project decisions, session history,
-action audits, and approved capabilities in a per-project SQLite database.
+context to AI-assisted development. Each project gets its own configuration, memory,
+decision log, and action audit trail in a local SQLite database.
 
-## Features
+## Status
 
-- **Per-project persistent state** — context is loaded from `.pm-agent/` in your repo
-- **Multi-project isolation** — each project has its own config, memory, approvals, and state DB
-- **Interactive REPL** — chat with the agent via a rich terminal interface
-- **Action lifecycle** — propose, approve, execute, and audit shell/git/github operations
-- **Decision tracking** — record and accept/reject architectural decisions
-- **Memory retrieval** — FTS5-powered search across past sessions, decisions, and notes
-- **Legacy migration** — import existing state from a global database into per-project storage
+Alpha — under active development. The CLI is stable for daily use; the schema and API
+may change before a 1.0 release.
 
-## Requirements
+## Key Concepts
 
-- Python 3.12+
-- An OpenAI-compatible chat endpoint (e.g., Ollama, OpenAI, or any compatible API)
-- SQLite with FTS5 (included in Python's `sqlite3` module)
+```
+my-project/
+  .pm-agent/        ← created by `pm-agent init`
+    project.toml    ← machine-readable project config (commit this)
+    memory.md       ← human-editable notes (commit this)
+    state.db        ← SQLite state DB (gitignored, auto-created)
+    logs/           ← action error logs (gitignored)
+```
+
+### Project Discovery
+
+`pm-agent` walks up from your current directory looking for `.pm-agent/`. If
+found, that directory becomes the project root. If not found, it looks for a
+`.git` directory as a fallback. This means:
+
+- Run `pm-agent status` from any subdirectory of your project.
+- Pass `--project-root /path` to pin an exact root (bypasses discovery).
+- Pass `--repo /path` to set a different starting point for discovery.
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `pm-agent init` | Initialize `.pm-agent/` in the current repo |
+| `pm-agent` / `pm-agent repl` | Start the interactive REPL |
+| `pm-agent status` | Show project state and active config |
+| `pm-agent doctor` | Check environment, config, and permissions |
+| `pm-agent spec show` | Display the project specification |
+| `pm-agent memory show` | Display project memory |
+| `pm-agent memory add <text>` | Append a dated memory entry |
+| `pm-agent migrate` | Import legacy global DB into `.pm-agent/state.db` |
 
 ## Installation
 
-### Quick install (pipx)
+Requires **Python 3.12+** and an OpenAI-compatible chat endpoint
+(Ollama, OpenAI, or any compatible API).
+
+### Quick install (recommended)
+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sm-me-dev/pm-agent/main/scripts/install.sh | bash
+```
+
+To pin a version:
+
+```bash
+PM_AGENT_VERSION=0.3.0 curl -fsSL https://raw.githubusercontent.com/sm-me-dev/pm-agent/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/sm-me-dev/pm-agent/main/scripts/install.ps1 | iex
+```
+
+To pin a version:
+
+```powershell
+$env:PM_AGENT_VERSION = "0.3.0"; irm https://raw.githubusercontent.com/sm-me-dev/pm-agent/main/scripts/install.ps1 | iex
+```
+
+> **Security note:** piping from the web to your shell is convenient but skips
+> normal verification. Review the script before running:
+> - [install.sh](scripts/install.sh)
+> - [install.ps1](scripts/install.ps1)
+
+The installer detects or installs [pipx](https://github.com/pypa/pipx) and
+uses it to install `pm-agent` into an isolated environment.
+
+### pipx (any platform)
 
 ```bash
 pipx install pm-agent
 ```
 
+Once published to PyPI. Until then, install from source (see below).
+
 ### From source
 
 ```bash
-git clone https://github.com/sm-me-uwe/pm-agent.git
+git clone https://github.com/sm-me-dev/pm-agent.git
 cd pm-agent
-pip install -e .
-```
-
-### uv
-
-```bash
-uv tool install pm-agent
+pip install -e ".[dev]"
 ```
 
 ### Verify
@@ -50,87 +106,37 @@ pm-agent --help
 
 ## Quickstart
 
-### 1. Initialize a project
-
 ```bash
 cd /path/to/your/repo
-pm-agent init
+pm-agent init            # creates .pm-agent/
+pm-agent                 # starts the REPL
 ```
-
-This creates a `.pm-agent/` directory with:
-- `project.toml` — machine-readable project configuration
-- `memory.md` — human-editable project memory/notes
-
-### 2. Start the REPL
 
 ```bash
-pm-agent
+pm-agent status          # inspect project state
+pm-agent doctor          # run diagnostics
+pm-agent migrate         # import legacy data if you used pm-agent before v0.3
 ```
 
-Or explicitly:
-
-```bash
-pm-agent repl
-```
-
-The first run creates the SQLite state database at `.pm-agent/state.db`.
-
-### 3. Inspect project state
-
-```bash
-pm-agent status
-pm-agent spec show
-pm-agent memory show
-```
-
-### 4. Add memory notes
-
-```bash
-pm-agent memory add "Decided to use SQLite for all persistence"
-```
-
-### 5. Run diagnostics
-
-```bash
-pm-agent doctor
-```
-
-## Commands
-
-| Command | Description |
-|---|---|
-| `pm-agent init` | Initialize `.pm-agent/` in the current directory |
-| `pm-agent repl` | Start the interactive REPL (default) |
-| `pm-agent status` | Show project status and active configuration |
-| `pm-agent doctor` | Check environment, config, and permissions |
-| `pm-agent spec show` | Display the project specification |
-| `pm-agent memory show` | Display project memory |
-| `pm-agent memory add <text>` | Append a memory entry |
-| `pm-agent migrate` | Import legacy global DB into project-local storage |
-| `pm-agent --help` | Show all options |
-
-## Configuration
-
-### Precedence (highest to lowest)
+## Configuration Precedence
 
 1. CLI flags (`--model`, `--db`, `--repo`, etc.)
 2. Environment variables (`PM_AGENT_*`)
-3. `.pm-agent/project.toml` (project-local)
+3. `.pm-agent/project.toml` (per-project)
 4. `~/.config/pm-agent/config.toml` (user-global)
 5. Built-in defaults
 
-### Environment Variables
+### Key Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `PM_AGENT_MODEL` | `glm-5.2` | Model name |
 | `PM_AGENT_BASE_URL` | `http://localhost:11434/v1` | API endpoint |
-| `PM_AGENT_API_KEY` | `` | API key |
+| `PM_AGENT_API_KEY` | — | API key |
 | `PM_AGENT_HISTORY_LIMIT` | `75` | Messages in context window |
-| `PM_AGENT_CONTEXT_TOKEN_BUDGET` | `6000` | Token budget × 3 = char budget |
 | `PM_AGENT_ALWAYS_APPROVE` | `false` | Auto-approve all actions |
 
-### Project Config (`project.toml`)
+## Project Config (`project.toml`)
 
 ```toml
 [project]
@@ -150,26 +156,6 @@ blocked_actions = []
 # error_log_path = ""
 ```
 
-### Global Config (`~/.config/pm-agent/config.toml`)
-
-```toml
-[defaults]
-model = ""
-base_url = ""
-history_limit = 75
-```
-
-## Project Layout
-
-```
-my-project/
-  .pm-agent/
-    project.toml      # Project configuration (commit this)
-    memory.md         # Human-editable notes (commit this)
-    state.db          # SQLite database (gitignored)
-    logs/             # Error logs (gitignored)
-```
-
 ## Migration from Legacy Global DB
 
 If you previously used pm-agent with a global state database at
@@ -183,22 +169,26 @@ pm-agent migrate    # copy existing data into .pm-agent/state.db
 
 The migration is idempotent — running it multiple times is safe.
 
-## Safety Model
+## Safety
 
-- Repository access is read-only by default
-- Every external action requires explicit approval (unless auto-approved via rules)
-- Approval is payload-specific and tied to a content hash
-- The agent never writes to the managed repository directly
-- All actions are logged with an immutable audit trail
+- Repository access is read-only by default.
+- External actions require per-payload approval (configurable via rules).
+- All actions are logged with an immutable audit trail.
 
 ## Development
 
 ```bash
-git clone https://github.com/sm-me-uwe/pm-agent.git
+git clone https://github.com/sm-me-dev/pm-agent.git
 cd pm-agent
 pip install -e ".[dev]"
-python -m pytest tests/
+pytest
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full development workflow.
+
+## Release
+
+See [RELEASE.md](RELEASE.md) for the release process.
 
 ## License
 

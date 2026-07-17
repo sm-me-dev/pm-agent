@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local env
+.env
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Project-local pm-agent state (per-project)
+.pm-agent/state.db
+.pm-agent/logs/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tool / dev config
+.opencode/
+
+# Session / runtime artifacts
+session-*.md
+logs/
+*.log
+
+# Stale compatibility shims (pre-0.2)
+pm_agent/
+
+# Development docs (not shipped)
+context/
+docs/
+project-description.md
+opencode.example.json
+
+# Graphify (local knowledge graph)
+graphify-out/
