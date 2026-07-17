@@ -7,6 +7,7 @@ from pm_agent.domain.models import (
     ActionProposal,
     ApprovedAction,
     DispatchReceipt,
+    action_fingerprint,
     new_id,
     payload_hash,
     utc_now,
@@ -37,6 +38,11 @@ class ActionService:
             risk_level=policy_decision.risk_level,
             status=ActionStatus.PROPOSED,
             created_at=utc_now(),
+            fingerprint=action_fingerprint(
+                candidate.action_type.value,
+                candidate.operation,
+                payload_hash(candidate.payload),
+            ),
         )
         self.store.create_action(proposal)
         if not policy_decision.allowed:

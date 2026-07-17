@@ -511,6 +511,11 @@ def _migrate_actions(src, dest, src_pid, dst_pid, counts, skipped, id_map, dry_r
 
 def _migrate_action_events(src, dest, action_id_map):
     for legacy_aid, new_aid in action_id_map.items():
+        existing_count = dest.execute(
+            "SELECT COUNT(*) FROM action_events WHERE action_id = ?", (new_aid,)
+        ).fetchone()[0]
+        if existing_count > 0:
+            continue
         rows = src.execute(
             "SELECT * FROM action_events WHERE action_id = ?", (legacy_aid,)
         ).fetchall()
@@ -527,6 +532,11 @@ def _migrate_action_outcomes(src, dest, action_id_map):
             "SELECT * FROM action_outcomes WHERE action_id = ?", (legacy_aid,)
         ).fetchone()
         if row:
+            existing = dest.execute(
+                "SELECT 1 FROM action_outcomes WHERE action_id = ?", (new_aid,)
+            ).fetchone()
+            if existing:
+                continue
             dest.execute(
                 "INSERT INTO action_outcomes (action_id, host_correlation_id, exit_code, stdout_redacted, stderr_redacted, result_json, started_at, completed_at, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (new_aid, row["host_correlation_id"], row["exit_code"], row["stdout_redacted"], row["stderr_redacted"], row["result_json"], row["started_at"], row["completed_at"], row["recorded_at"]),
