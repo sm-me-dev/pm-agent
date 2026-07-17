@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 
 from pm_agent.domain.enums import ActionStatus, DecisionStatus
@@ -7,6 +8,8 @@ from pm_agent.domain.models import PMResponse, canonical_json
 from pm_agent.ports.memory import RetrievalQuery
 from pm_agent.ports.model import ModelEventHandler, ModelRequest
 from pm_agent.prompts.parser import ResponseValidationError
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionError(Exception):
@@ -110,7 +113,16 @@ class ConversationService:
                 stored_actions.append(proposal)
                 approved_candidates.append(candidate)
             else:
-                blocked_operations.append(proposal.operation)
+                reason = self.store.get_action_rejection_reason(proposal.id) or "unknown"
+                logger.debug(
+                    "action_rejected: operation=%s type=%s tool_category=%s reason=%s payload=%s",
+                    candidate.operation,
+                    candidate.action_type.value,
+                    candidate.tool_category,
+                    reason,
+                    candidate.payload,
+                )
+                blocked_operations.append(f"{proposal.operation} (reason: {reason})")
 
         if blocked_operations or len(approved_candidates) != len(response.actions_requiring_approval):
             response = replace(

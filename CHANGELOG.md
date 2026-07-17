@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.8 (2026-07-17)
+
+### Fixed
+- Safety policy now accepts `cmd` and `shell_command` as alternative payload keys for bash commands, so GLM-5.2 models that don't use the `command` key are no longer silently rejected.
+- Safety policy now fuzzy-matches tool_category values containing "filesystem" or "shell" (e.g. "file_system"), reducing false rejections from models that deviate from the exact schema.
+- GitHub action scope errors (e.g. missing `read:project`) are now marked as `retryable` in the error log so downstream consumers know the user can fix and retry.
+- Added pre-flight GitHub scope check: before dispatching `list_projects`, `add_issue_to_project`, `setup_sprint`, etc., pm-agent now runs `gh auth status` and fails fast with a clear fix command if required scopes are missing.
+- Rejection reasons from the safety policy are now shown inline in the "Safety policy rejected" message (e.g. `cat /path (reason: A bash proposal requires a command)`).
+
+### Added
+- Debug logging in `ActionPolicy.evaluate()` and `_evaluate_bash()` to help diagnose model payload issues.
+- Debug logging in `ConversationService` when actions are rejected.
+
 ## 0.3.7 (2026-07-17)
 
 ### Fixed

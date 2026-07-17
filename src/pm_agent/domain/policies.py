@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import shlex
 from dataclasses import dataclass
@@ -7,6 +8,8 @@ from typing import Any
 
 from .enums import ActionType
 from .models import ActionCandidate
+
+logger = logging.getLogger(__name__)
 
 
 class PolicyViolation(ValueError):
@@ -76,6 +79,13 @@ _GITHUB_AUTH_OPERATIONS = {"authenticate_browser", "disconnect"}
 class ActionPolicy:
     def evaluate(self, candidate: ActionCandidate) -> PolicyDecision:
         operation = candidate.operation.strip().lower().replace("-", "_")
+        logger.debug(
+            "policy.evaluate: type=%s tool_category=%s operation=%s payload_keys=%s",
+            candidate.action_type.value,
+            candidate.tool_category,
+            candidate.operation,
+            list(candidate.payload.keys()) if candidate.payload else [],
+        )
 
         if candidate.action_type is ActionType.GIT:
             if candidate.tool_category not in ("git", ""):
@@ -83,7 +93,15 @@ class ActionPolicy:
             return self._evaluate_git(candidate.payload)
         if candidate.action_type is ActionType.BASH:
             if candidate.tool_category not in ("filesystem", "shell", ""):
-                return PolicyDecision(False, "blocked", f"Action type BASH requires tool_category in ('filesystem', 'shell', ''), got '{candidate.tool_category}'")
+                logger.debug(
+                    "policy.evaluate: BASH tool_category=%s not in allowed set, checking if it contains filesystem/shell",
+                    candidate.tool_category,
+                )
+                cat_lower = candidate.tool_category.lower().replace("-", "_").replace(" ", "")
+                if "filesystem" in cat_lower or "shell" in cat_lower or "file" in cat_lower:
+                    logger.debug("policy.evaluate: BASH tool_category=%s accepted via fuzzy match", candidate.tool_category)
+                else:
+                    return PolicyDecision(False, "blocked", f"Action type BASH requires tool_category in ('filesystem', 'shell', ''), got '{candidate.tool_category}'")
             return self._evaluate_bash(candidate.payload)
         if candidate.action_type is ActionType.MCP:
             if candidate.tool_category not in {"filesystem", "git", "memory", "graphify", "sequential_thinking", "github"}:
@@ -123,8 +141,14 @@ class ActionPolicy:
     def _evaluate_bash(self, payload: dict[str, Any]) -> PolicyDecision:
         command = str(payload.get("command", "")).strip()
         if not command:
+            command = str(payload.get("cmd", "")).strip()
+        if not command:
+            command = str(payload.get("shell_command", "")).strip()
+        if not command:
+            logger.debug("policy._evaluate_bash: no command in payload keys=%s payload=%s", list(payload.keys()), payload)
             return PolicyDecision(False, "blocked", "A bash proposal requires a command.")
         if _SHELL_META.search(command):
+            logger.debug("policy._evaluate_bash: shell meta detected in command=%s", command)
             return PolicyDecision(False, "blocked", "Shell redirection, pipelines, and substitutions are prohibited.")
         try:
             parts = shlex.split(command)
@@ -137,6 +161,7 @@ class ActionPolicy:
             return self._evaluate_git(payload)
         allowed = {"cat", "find", "head", "ls", "pwd", "rg", "sed", "tail", "wc"}
         if executable not in allowed:
+            logger.debug("policy._evaluate_bash: executable=%s not in allowed set", executable)
             return PolicyDecision(
                 False, "blocked", "Standalone bash is limited to a small read-only inspection allowlist."
             )

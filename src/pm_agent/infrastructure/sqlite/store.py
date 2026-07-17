@@ -913,6 +913,21 @@ class SQLiteStore:
             (new_id(), action_id, event_type, actor, canonical_json(details), utc_now()),
         )
 
+    def get_action_rejection_reason(self, action_id: str) -> str | None:
+        with self.factory.connect() as connection:
+            row = connection.execute(
+                "SELECT details_json FROM action_events WHERE action_id = ? AND event_type = 'rejected' ORDER BY created_at DESC LIMIT 1",
+                (action_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            import json
+            details = json.loads(row["details_json"])
+            return details.get("reason")
+        except Exception:
+            return None
+
     @staticmethod
     def _project(row: Any) -> Project:
         return Project(

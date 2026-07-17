@@ -9,6 +9,20 @@ from pm_agent.domain.models import ActionCandidate
 from pm_agent.infrastructure.hosts import IntegrationHostBridge
 from pm_agent.infrastructure.sqlite import SQLiteStore
 
+_SCOPES_OUTPUT = (
+    "github.com\n"
+    "  ✓ Logged in to github.com account test-user (keyring)\n"
+    "  - Token scopes: 'admin:public_key', 'gist', 'read:org', 'read:project', 'repo'\n"
+)
+
+
+def _make_fake_run(default_rc=0, default_stdout="", default_stderr=""):
+    def fake_run(command, **kwargs):
+        if "auth" in command and "status" in command:
+            return SimpleNamespace(returncode=0, stdout=_SCOPES_OUTPUT, stderr="")
+        return SimpleNamespace(returncode=default_rc, stdout=default_stdout, stderr=default_stderr)
+    return fake_run
+
 
 def test_approved_github_browser_auth_is_executed_and_recorded(tmp_path, monkeypatch):
     monkeypatch.setattr(
@@ -344,16 +358,11 @@ def test_github_list_projects_is_dispatched_and_succeeded(tmp_path, monkeypatch)
         lambda executable: "/usr/bin/gh" if executable == "gh" else None,
     )
 
-    def fake_run(command, **kwargs):
-        return SimpleNamespace(
-            returncode=0,
-            stdout='[{"number":1,"title":"Sprint Board","state":"open"}]',
-            stderr="",
-        )
-
     monkeypatch.setattr(
         "pm_agent.infrastructure.hosts.integrations.subprocess.run",
-        fake_run,
+        _make_fake_run(
+            default_stdout='[{"number":1,"title":"Sprint Board","state":"open"}]',
+        ),
     )
     store = SQLiteStore(tmp_path / "state.db")
     project = store.resolve_project(tmp_path)
@@ -433,6 +442,8 @@ def test_github_create_milestone_is_dispatched_and_succeeded(tmp_path, monkeypat
     calls = []
 
     def fake_run(command, **kwargs):
+        if "auth" in command and "status" in command:
+            return SimpleNamespace(returncode=0, stdout=_SCOPES_OUTPUT, stderr="")
         calls.append(command)
         return SimpleNamespace(
             returncode=0,
@@ -478,16 +489,11 @@ def test_github_create_issue_is_dispatched_and_succeeded(tmp_path, monkeypatch):
         lambda executable: "/usr/bin/gh" if executable == "gh" else None,
     )
 
-    def fake_run(command, **kwargs):
-        return SimpleNamespace(
-            returncode=0,
-            stdout='{"number":42,"title":"Fix bug","html_url":"https://github.com/..."}',
-            stderr="",
-        )
-
     monkeypatch.setattr(
         "pm_agent.infrastructure.hosts.integrations.subprocess.run",
-        fake_run,
+        _make_fake_run(
+            default_stdout='{"number":42,"title":"Fix bug","html_url":"https://github.com/..."}',
+        ),
     )
     store = SQLiteStore(tmp_path / "state.db")
     project = store.resolve_project(tmp_path)
@@ -526,6 +532,8 @@ def test_github_create_issues_batch_is_dispatched(tmp_path, monkeypatch):
     call_count = [0]
 
     def fake_run(command, **kwargs):
+        if "auth" in command and "status" in command:
+            return SimpleNamespace(returncode=0, stdout=_SCOPES_OUTPUT, stderr="")
         call_count[0] += 1
         idx = call_count[0]
         return SimpleNamespace(
@@ -578,6 +586,8 @@ def test_github_create_issues_partial_failure(tmp_path, monkeypatch):
     call_count = [0]
 
     def fake_run(command, **kwargs):
+        if "auth" in command and "status" in command:
+            return SimpleNamespace(returncode=0, stdout=_SCOPES_OUTPUT, stderr="")
         call_count[0] += 1
         if call_count[0] == 1:
             return SimpleNamespace(returncode=0, stdout='{"number":1,"title":"Good"}', stderr="")
@@ -625,16 +635,9 @@ def test_github_setup_sprint_is_dispatched_and_succeeded(tmp_path, monkeypatch):
         lambda executable: "/usr/bin/gh" if executable == "gh" else None,
     )
 
-    def fake_run(command, **kwargs):
-        return SimpleNamespace(
-            returncode=0,
-            stdout='{"number":1,"title":"Sprint 1"}',
-            stderr="",
-        )
-
     monkeypatch.setattr(
         "pm_agent.infrastructure.hosts.integrations.subprocess.run",
-        fake_run,
+        _make_fake_run(default_stdout='{"number":1,"title":"Sprint 1"}'),
     )
     store = SQLiteStore(tmp_path / "state.db")
     project = store.resolve_project(tmp_path)
@@ -676,6 +679,8 @@ def test_github_create_project_is_dispatched(tmp_path, monkeypatch):
     )
 
     def fake_run(command, **kwargs):
+        if "auth" in command and "status" in command:
+            return SimpleNamespace(returncode=0, stdout=_SCOPES_OUTPUT, stderr="")
         return SimpleNamespace(
             returncode=0,
             stdout="Created project 'My Board'.",

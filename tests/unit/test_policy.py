@@ -184,3 +184,44 @@ def test_blocks_credentials_inside_authentication_payload():
         )
     )
     assert not result.allowed
+
+
+def test_bash_accepts_cmd_key_in_payload():
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.BASH, "inspect", {"cmd": "cat /etc/hosts"}, "filesystem")
+    )
+    assert result.allowed
+    assert result.risk_level == "medium"
+
+
+def test_bash_accepts_shell_command_key_in_payload():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.BASH, "inspect", {"shell_command": "ls -la /tmp"}, "filesystem"
+        )
+    )
+    assert result.allowed
+
+
+def test_bash_accepts_filesystem_in_tool_category():
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.BASH, "inspect", {"command": "pwd"}, "filesystem")
+    )
+    assert result.allowed
+
+
+def test_bash_blocks_empty_payload():
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.BASH, "inspect", {}, "filesystem")
+    )
+    assert not result.allowed
+    assert "command" in result.reason.lower()
+
+
+def test_bash_allows_ls_cat_head_tail_find():
+    policy = ActionPolicy()
+    for cmd in ["ls /tmp", "cat /etc/hosts", "head -5 file.txt", "tail -5 file.txt", "find . -name '*.py'"]:
+        result = policy.evaluate(
+            candidate(ActionType.BASH, "inspect", {"command": cmd}, "filesystem")
+        )
+        assert result.allowed, f"Expected {cmd} to be allowed"

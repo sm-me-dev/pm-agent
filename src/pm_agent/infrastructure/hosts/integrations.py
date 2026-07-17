@@ -61,6 +61,17 @@ class IntegrationHostBridge:
     _GITHUB_ALL_OPS: frozenset = frozenset(
         list(_GITHUB_READ_OPS.keys()) + list(_GITHUB_WRITE_OPS)
     )
+    _GITHUB_SCOPE_REQUIREMENTS: dict[str, list[str]] = {
+        "list_projects": ["read:project"],
+        "add_issue_to_project": ["read:project", "project"],
+        "create_project": ["read:project", "project"],
+        "setup_sprint": ["read:project", "project"],
+        "create_milestone": ["repo"],
+        "create_issue": ["repo"],
+        "create_issues": ["repo"],
+        "update_issue": ["repo"],
+        "update_milestone": ["repo"],
+    }
 
     def __init__(self, error_logger: ErrorLogger | None = None,
                  repo_root: str | None = None) -> None:
@@ -485,6 +496,10 @@ class IntegrationHostBridge:
             return receipt
         handler = self._resolve_write_handler(proposal.operation)
         if handler is not None:
+            scope_error = IntegrationHostBridge._check_github_scopes(proposal.operation)
+            if scope_error is not None:
+                self._log_if_failed(action, scope_error)
+                return scope_error
             receipt = handler(self, action)
             self._log_if_failed(action, receipt)
             return receipt
@@ -608,11 +623,14 @@ class IntegrationHostBridge:
 
     def _log_if_failed(self, action: ApprovedAction, receipt: DispatchReceipt) -> None:
         if receipt.exit_code and receipt.exit_code != 0:
+            error_text = receipt.stderr or receipt.message
+            is_scope_error = "missing required scopes" in error_text
             self._log_error(
                 action=action,
-                error=receipt.stderr or receipt.message,
+                error=error_text,
                 exit_code=receipt.exit_code,
                 category="action_failure",
+                retryable=is_scope_error,
                 user_message=receipt.message,
             )
 
@@ -735,10 +753,51 @@ class IntegrationHostBridge:
         )
 
     @staticmethod
+    def _check_github_scopes(operation: str) -> DispatchReceipt | None:
+        required = IntegrationHostBridge._GITHUB_SCOPE_REQUIREMENTS.get(operation)
+        if not required:
+            return None
+        executable = shutil.which("gh")
+        if executable is None:
+            return None
+        try:
+            completed = subprocess.run(
+                [executable, "auth", "status"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        output = completed.stdout + completed.stderr
+        missing = []
+        for scope in required:
+            if scope not in output:
+                missing.append(scope)
+        if not missing:
+            return None
+        scopes_str = ",".join(missing)
+        return DispatchReceipt(
+            correlation_id=None,
+            dispatched=True,
+            completed=True,
+            exit_code=1,
+            message=(
+                f"GitHub read action '{operation}' requires scopes [{scopes_str}] "
+                f"which are not granted.\n"
+                f"Fix: Run:  gh auth refresh -s {scopes_str}"
+            ),
+            stderr=f"missing required scopes [{scopes_str}]",
+        )
+
+    @staticmethod
     def _execute_github_read(
         action: ApprovedAction,
         args_builder: Callable[[dict], list[str]],
     ) -> DispatchReceipt:
+        scope_error = IntegrationHostBridge._check_github_scopes(action.proposal.operation)
+        if scope_error is not None:
+            return scope_error
         executable = shutil.which("gh")
         if executable is None:
             return DispatchReceipt(
