@@ -6,6 +6,7 @@ import pytest
 
 from pm_agent.application.action_service import ActionService
 from pm_agent.application.conversation_service import ConversationService
+from pm_agent.application.decision_service import DecisionService
 from pm_agent.infrastructure.hosts import StandaloneHostBridge
 from pm_agent.infrastructure.sqlite import SQLiteStore
 from pm_agent.ports.model import ModelResult
@@ -235,3 +236,49 @@ def test_materially_changed_action_creates_new_proposal(tmp_path):
     service.handle(project, session, "Assess repo")
     service.handle(project, session, "Assess other repo")
     assert len(store.list_actions(project.id)) == 2
+
+
+def test_rejected_decision_is_not_reprompted(tmp_path):
+    provider = FakeProvider([payload(decisions=[DECISION]), payload(decisions=[DECISION])])
+    store, project, session, service = setup(tmp_path, provider)
+    service.handle(project, session, "Plan")
+    pending = store.list_decisions(project.id)
+    DecisionService(store).reject(project.id, pending[0].id)
+    service.handle(project, session, "Plan again")
+    assert len(store.list_decisions(project.id)) == 1
+
+
+def test_deferred_decision_is_not_reprompted(tmp_path):
+    provider = FakeProvider([payload(decisions=[DECISION]), payload(decisions=[DECISION])])
+    store, project, session, service = setup(tmp_path, provider)
+    service.handle(project, session, "Plan")
+    pending = store.list_decisions(project.id)
+    DecisionService(store).defer(project.id, pending[0].id)
+    deferred = store.list_decisions(project.id)
+    assert deferred[0].status.value == "deferred"
+    service.handle(project, session, "Plan again")
+    assert len(store.list_decisions(project.id)) == 1
+
+
+def test_materially_changed_decision_gets_fresh_prompt(tmp_path):
+    changed = {**DECISION, "decision": "We will use Postgres instead of SQLite."}
+    provider = FakeProvider([payload(decisions=[DECISION]), payload(decisions=[changed])])
+    store, project, session, service = setup(tmp_path, provider)
+    service.handle(project, session, "Plan")
+    service.handle(project, session, "Plan again")
+    decisions = store.list_decisions(project.id)
+    assert len(decisions) == 2
+    assert "superseded" in {d.status.value for d in decisions}
+
+
+def test_approved_action_is_not_reprompted(tmp_path):
+    provider = FakeProvider(
+        [payload(actions=[READ_REPO_ACTION]), payload(actions=[READ_REPO_ACTION])]
+    )
+    store, project, session, service = setup(tmp_path, provider)
+    _, first = service.handle(project, session, "Assess repo")
+    assert len(first) == 1
+    ActionService(store, StandaloneHostBridge()).approve(first[0].id)
+    _, second = service.handle(project, session, "Assess repo again")
+    assert len(second) == 0
+    assert store.list_actions(project.id)[0].status.value == "approved"

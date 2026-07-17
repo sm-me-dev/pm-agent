@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS decisions_v2 (
     title TEXT NOT NULL,
     decision TEXT NOT NULL,
     reason TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected','superseded')),
+    status TEXT NOT NULL CHECK(status IN ('proposed','accepted','rejected','deferred','superseded')),
     supersedes_id TEXT REFERENCES decisions_v2(id),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

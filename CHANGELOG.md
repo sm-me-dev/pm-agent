@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.10 (2026-07-17)
+
+### Fixed
+- Approved and rejected decisions/actions now advance execution instead of re-entering the approval loop. Resolution state is persisted by stable fingerprint, so the agent will not re-ask for the same resolved item within a run or across resume boundaries.
+- Skipped decisions now persist an explicit `deferred` status (migration 005) instead of silently staying `proposed`, so they are not re-prompted after resume.
+- A materially changed decision (same topic/title, different text) now triggers a fresh approval prompt and explicitly supersedes the prior pending/deferred proposal.
+- Action/runtime failures are now classified and routed back into the agent loop in a controlled, structured way (`[action_error]` events with category, agent-fixable, retryable, message, stderr).
+
+### Added
+- `pm_agent.domain.errors.ActionError` / `ErrorCategory` and `classify_action_error()` to classify failures as `agent_fixable`, `user_action_required`, or `fatal`.
+- Conservative recovery policy in the REPL: agent-fixable failures are fed back so the model may revise and retry (bounded to `MAX_RECOVERY_ATTEMPTS = 3` per run); external/permission/dependency/network failures halt the loop and ask the user to intervene (full stack traces stay in the error log).
+- `DecisionStatus.DEFERRED` and `DecisionService.defer()`.
+
+### Changed
+- The REPL approval loop now breaks and asks the user when an action cannot be resolved automatically, instead of silently looping.
+
 ## 0.3.9 (2026-07-17)
 
 ### Fixed

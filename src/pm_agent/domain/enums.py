@@ -7,6 +7,7 @@ class DecisionStatus(StrEnum):
     PROPOSED = "proposed"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
+    DEFERRED = "deferred"
     SUPERSEDED = "superseded"
 
 

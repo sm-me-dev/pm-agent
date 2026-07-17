@@ -20,6 +20,7 @@ def apply_migrations(connection: sqlite3.Connection) -> None:
         (2, "legacy_import_tracking", "002_legacy_import_tracking.sql"),
         (3, "approval_rules", "003_approval_rules.sql"),
         (4, "decision_action_fingerprints", "004_decision_action_fingerprints.sql"),
+        (5, "decision_deferred_status", "005_decision_deferred_status.sql"),
     ]
     for version, name, filename in migrations:
         if version in applied:

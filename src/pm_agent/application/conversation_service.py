@@ -117,6 +117,7 @@ class ConversationService:
                     existing.status.value,
                 )
                 continue
+            self._supersede_prior_decisions(project, session, decision, fingerprint)
             self.store.add_decision(
                 project.id,
                 session.id,
@@ -206,3 +207,30 @@ class ConversationService:
         if on_model_event is None:
             return self.provider.generate(request)
         return self.provider.generate(request, on_model_event)
+
+    def _supersede_prior_decisions(
+        self, project, session, decision, fingerprint: str
+    ) -> None:
+        """If an earlier decision on the same topic/title was proposed but the
+        model now proposes a materially different one, mark the old proposal as
+        superseded so pending-approval state stays consistent.
+        """
+        supersedeable = {DecisionStatus.PROPOSED, DecisionStatus.DEFERRED}
+        priors = [
+            d
+            for d in self.store.list_decisions(project.id, limit=10_000)
+            if d.session_id == session.id
+            and d.topic == decision.topic
+            and d.title == decision.title
+            and d.fingerprint != fingerprint
+            and d.status in supersedeable
+        ]
+        for prior in priors:
+            logger.debug(
+                "superseding prior decision %s (status=%s) with revised proposal",
+                prior.id,
+                prior.status.value,
+            )
+            self.store.set_decision_status(
+                prior.id, project.id, DecisionStatus.SUPERSEDED
+            )
