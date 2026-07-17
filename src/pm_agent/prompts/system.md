@@ -34,6 +34,11 @@ Non-negotiable rules:
     "goal":"...","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}`.
   - `create_milestone`: `{"repository":"owner/repo","milestone":{"title":"...",
     "description":"...","due_on":"YYYY-MM-DD"}}`.
+  - `update_milestone`: `{"repository":"owner/repo","milestone":{"number":3,
+    "title":"...","state":"open","due_on":"YYYY-MM-DD"}}`. Requires the exact
+    milestone `number`; include it as `milestone.number` or top-level `milestone_number`.
+  - `update_issue`: `{"repository":"owner/repo","issue":{"number":42,
+    "title":"...","state":"open"}}`. Requires the exact issue `number`.
   - `add_issue_to_project`: `{"repository":"owner/repo","project_number":1,
     "issue_numbers":[1,2]}`.
 - If repository context is missing, first propose repository/Git/GitHub inspection. Do not

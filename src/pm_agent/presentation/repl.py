@@ -9,7 +9,7 @@ from rich.panel import Panel
 
 from pm_agent.application.action_service import ActionService
 from pm_agent.application.context_service import ContextService
-from pm_agent.application.conversation_service import ConversationService
+from pm_agent.application.conversation_service import ConnectionError, ConversationService
 from pm_agent.application.decision_service import DecisionService
 from pm_agent.application.error_logger import ErrorLogger
 from pm_agent.application.integration_service import IntegrationService
@@ -17,6 +17,7 @@ from pm_agent.application.session_service import SessionService
 from pm_agent.application.summary_service import SummaryService
 from pm_agent.domain.approval_rules import ApprovalRule, make_approval_rule
 from pm_agent.domain.enums import ActionStatus, DecisionStatus
+from pm_agent.domain.errors import classify_action_error
 from pm_agent.domain.models import (
     DispatchReceipt,
     Project,
@@ -44,6 +45,9 @@ from pm_agent.presentation.renderers import (
     summary_markdown,
 )
 from pm_agent.presentation.streaming import StreamingDisplay
+from pm_agent.prompts.parser import ResponseValidationError
+
+MAX_RECOVERY_ATTEMPTS = 3
 
 
 @dataclass
@@ -84,6 +88,10 @@ class PMAgentREPL:
         self._file_index = LazyFileIndex(project.canonical_path)
         self._completer = PMCompleter(self._file_index)
         self.input = InteractiveInput(completer=self._completer)
+
+        self._presented_decision_ids: set[str] = set()
+        self._recovery_attempts = 0
+        self._halt_requested = False
 
         if always_approve:
             self._install_always_approve_rules()
@@ -163,6 +171,8 @@ class PMAgentREPL:
         self._closed = True
 
     def _chat(self, user_input: str) -> None:
+        self._recovery_attempts = 0
+        self._halt_requested = False
         if not self._context_loaded:
             self._context_loaded = True
             c_dir_str = self._context_dir or str(Path.cwd() / "context")
@@ -206,6 +216,30 @@ class PMAgentREPL:
                     )
                 )
                 return
+            except ConnectionError as exc:
+                self.console.print(
+                    Panel(
+                        f"Connection to model failed: {exc}\n\n"
+                        "This is typically a temporary network or server issue. "
+                        "Please check your connection and try again.",
+                        title="Model Connection Error",
+                        border_style="red",
+                    )
+                )
+                self._log_orchestration_error(exc, retryable=True, category="model_connection_error")
+                return
+            except ResponseValidationError as exc:
+                self.console.print(
+                    Panel(
+                        f"Model returned an invalid response: {exc}\n\n"
+                        "The model may not support the required response format, "
+                        "or may be overloaded. Try again or check your model configuration.",
+                        title="Model Response Error",
+                        border_style="red",
+                    )
+                )
+                self._log_orchestration_error(exc, retryable=True, category="model_response_error")
+                return
             except Exception as exc:
                 self.console.print(f"[bold red]Request failed:[/] {exc}")
                 self._log_orchestration_error(exc)
@@ -223,6 +257,13 @@ class PMAgentREPL:
                 action_events = self._interactive_approval_flow(actions)
                 if action_events:
                     event_parts.append(action_events)
+
+            if self._halt_requested:
+                self.console.print(
+                    "[dim]Stopping to let you resolve the issue. "
+                    "Fix it, then continue with a new request or /retry.[/]"
+                )
+                break
 
             if not event_parts:
                 break
@@ -290,12 +331,17 @@ class PMAgentREPL:
         return "\n---\n".join(events)
 
     def _resolve_pending_decisions(self) -> str:
-        decisions = self.services.store.list_decisions(
-            self.project.id,
-            statuses=(DecisionStatus.PROPOSED,),
-        )
+        decisions = [
+            d
+            for d in self.services.store.list_decisions(
+                self.project.id,
+                statuses=(DecisionStatus.PROPOSED,),
+            )
+            if d.id not in self._presented_decision_ids
+        ]
         if not decisions:
             return ""
+        self._presented_decision_ids.update(d.id for d in decisions)
         self.console.print()
         self.console.print(decision_table(decisions))
         events: list[str] = []
@@ -319,10 +365,13 @@ class PMAgentREPL:
                 self.console.print("  [red]Decision rejected.[/]")
                 events.append(self._format_decision_rejected(decision))
             elif raw in ("s", "skip"):
-                self.console.print("  [dim]Skipped.[/]")
+                self.services.decisions.defer(self.project.id, decision.id)
+                self.console.print("  [dim]Deferred.[/]")
                 continue
             elif raw in ("q", "quit", "skip-all"):
-                self.console.print("  [dim]Remaining decisions skipped.[/]")
+                for remaining in decisions[decisions.index(decision):]:
+                    self.services.decisions.defer(self.project.id, remaining.id)
+                self.console.print("  [dim]Remaining decisions deferred.[/]")
                 break
             elif raw in ("aa", "accept-all", "all"):
                 accept_all = True
@@ -342,27 +391,7 @@ class PMAgentREPL:
             self.console.print(f"[red]Approval failed:[/] {exc}")
             return ""
 
-        if receipt.dispatched:
-            outcome = ""
-            if receipt.stdout:
-                outcome += receipt.stdout[:200]
-            if receipt.stderr:
-                outcome += f"\n[stderr] {receipt.stderr[:200]}"
-            exit_code = receipt.exit_code
-            result_msg = (
-                f"Action {action.id[:8]} ({action.operation}) completed "
-                f"(exit={exit_code}).\n{outcome}".strip()
-            )
-            self.console.print(
-                Panel(receipt.message, title=f"Action Executed: {action.operation}",
-                      border_style="green" if exit_code == 0 else "red")
-            )
-            if exit_code and exit_code != 0:
-                msg = f"See {self._error_logger.path}" if self._error_logger else ""
-                self.console.print(
-                    f"[red]Action {action.id[:8]} failed (exit {exit_code}). {msg}[/]"
-                )
-        elif receipt.deferred_external:
+        if receipt.deferred_external:
             result_msg = (
                 f"Action {action.id[:8]} ({action.operation}) approved for external/standalone execution."
             )
@@ -379,28 +408,72 @@ class PMAgentREPL:
                     border_style="yellow"
                 )
             )
-        else:
-            self.services.actions.record_outcome(
-                action.id, exit_code=1, stderr=receipt.message,
-                result={"error": receipt.message},
+            self.services.store.add_message(
+                self.session.id, "system", f"[action_outcome] {result_msg}"
             )
+            return self._format_action_result(action, receipt)
+
+        if receipt.dispatched and receipt.exit_code in (None, 0):
+            outcome = ""
+            if receipt.stdout:
+                outcome += receipt.stdout[:200]
+            if receipt.stderr:
+                outcome += f"\n[stderr] {receipt.stderr[:200]}"
             result_msg = (
-                f"Action {action.id[:8]} ({action.operation}) failed to dispatch: {receipt.message}"
+                f"Action {action.id[:8]} ({action.operation}) completed (exit=0)."
+                f"\n{outcome}".strip()
             )
             self.console.print(
-                Panel(receipt.message, title=f"Action Dispatch Failed: {action.operation}",
-                      border_style="red")
+                Panel(receipt.message, title=f"Action Executed: {action.operation}",
+                      border_style="green")
             )
-            self._log_action_error(action, receipt,
-                                   error=receipt.message,
-                                   category="dispatch_failed")
+            if outcome:
+                self.console.print(outcome)
+            self.services.store.add_message(
+                self.session.id, "system", f"[action_outcome] {result_msg}"
+            )
+            return self._format_action_result(action, receipt)
 
-        self.services.store.add_message(
-            self.session.id, "system",
-            f"[action_outcome] {result_msg}"
+        # Dispatched but failed, or dispatch not available: route through the
+        # structured error path so the model can recover (if appropriate) or
+        # the run halts and asks the user.
+        self._log_action_error(
+            action, receipt,
+            error=receipt.message or receipt.stderr,
+            category=receipt.error_category or "action_failure",
         )
+        return self._handle_failed_dispatch(action, receipt)
 
-        return self._format_action_result(action, receipt)
+    def _handle_failed_dispatch(self, action, receipt) -> str:
+        error = classify_action_error(receipt, action)
+        self._recovery_attempts += 1
+        if not error.agent_fixable or self._recovery_attempts > MAX_RECOVERY_ATTEMPTS:
+            self._halt_for_user(error, action)
+            return ""
+        self.console.print(
+            Panel(
+                f"{error.message}\n\n"
+                f"Category: {error.category.value}. The model will be given this "
+                f"error and may attempt to revise the action "
+                f"(attempt {self._recovery_attempts}/{MAX_RECOVERY_ATTEMPTS}).",
+                title=f"Action Failed (recoverable): {action.operation}",
+                border_style="yellow",
+            )
+        )
+        return error.to_event()
+
+    def _halt_for_user(self, error, action) -> None:
+        self._halt_requested = True
+        self.console.print(
+            Panel(
+                f"{error.user_guidance or error.message}\n\n"
+                f"Action: {action.operation} ({action.action_type.value})\n"
+                f"This action cannot be completed automatically. Resolve it and "
+                f"continue, or adjust your request.",
+                title="Action Requires Your Intervention",
+                border_style="red",
+            )
+        )
 
     def _log_action_error(
         self,
@@ -434,15 +507,15 @@ class PMAgentREPL:
             category=category,
         )
 
-    def _log_orchestration_error(self, exception: BaseException) -> None:
+    def _log_orchestration_error(self, exception: BaseException, retryable: bool = True, category: str = "orchestration_error") -> None:
         if self._error_logger is None:
             return
         self._error_logger.log_failure(
             session_id=self.session.id,
             error=str(exception),
             exception=exception,
-            category="orchestration_error",
-            retryable=True,
+            category=category,
+            retryable=retryable,
             user_message=f"Unexpected error: {exception}",
         )
 

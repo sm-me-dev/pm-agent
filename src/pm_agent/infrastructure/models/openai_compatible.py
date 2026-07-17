@@ -3,8 +3,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from openai import OpenAI
+from openai import APIConnectionError, OpenAI
 
+from pm_agent.application.conversation_service import ConnectionError
 from pm_agent.ports.model import (
     ModelEventHandler,
     ModelRequest,
@@ -67,24 +68,38 @@ class OpenAICompatibleProvider:
         on_event: ModelEventHandler | None,
     ) -> ModelResult:
         if on_event is None:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=request.messages,
-                temperature=request.temperature,
-                response_format=response_format,
-            )
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=request.messages,
+                    temperature=request.temperature,
+                    response_format=response_format,
+                )
+            except (APIConnectionError, Exception) as exc:
+                error_msg = str(exc)
+                if "Connection reset by peer" in error_msg or "Connection error" in error_msg or isinstance(exc, APIConnectionError):
+                    exc_type = type(exc).__name__
+                    raise ConnectionError(f"Model connection failed: {exc_type}: {error_msg}") from exc
+                raise
             content = response.choices[0].message.content or "{}"
             clean_content, _ = self._separate_thinking(content)
             return ModelResult(content=clean_content, used_native_schema=used_native_schema)
 
         on_event(ModelStreamEvent(ModelStreamEventType.STATUS, "Connecting to model…"))
-        stream = self.client.chat.completions.create(
-            model=self.model,
-            messages=request.messages,
-            temperature=request.temperature,
-            response_format=response_format,
-            stream=True,
-        )
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=request.messages,
+                temperature=request.temperature,
+                response_format=response_format,
+                stream=True,
+            )
+        except (APIConnectionError, Exception) as exc:
+            error_msg = str(exc)
+            if "Connection reset by peer" in error_msg or "Connection error" in error_msg or isinstance(exc, APIConnectionError):
+                exc_type = type(exc).__name__
+                raise ConnectionError(f"Model connection failed: {exc_type}: {error_msg}") from exc
+            raise
         content_parts: list[str] = []
         for chunk in stream:
             if not chunk.choices:

@@ -14,6 +14,13 @@ from typing import Any
 from uuid import uuid4
 
 from pm_agent.application.error_logger import ErrorLogger
+from pm_agent.domain.actions import (
+    ALL_GITHUB_OPERATIONS,
+    capabilities_from_scopes,
+    parse_token_scopes,
+    required_capabilities,
+    scopes_for_capabilities,
+)
 from pm_agent.domain.enums import ActionType
 from pm_agent.domain.models import ApprovedAction, DispatchReceipt
 from pm_agent.ports.host import HostCapabilities
@@ -25,6 +32,11 @@ from .standalone import StandaloneHostBridge
 class IntegrationHostBridge:
     _GITHUB_READ_OPS: dict[str, Callable[[dict], list[str]]] = {
         "inspect_repository": lambda p: [
+            "repo", "view", p["repository"], "--json",
+            "name,description,url,defaultBranchRef,createdAt,updatedAt,owner,languages,"
+            "repositoryTopics",
+        ],
+        "read_repository": lambda p: [
             "repo", "view", p["repository"], "--json",
             "name,description,url,defaultBranchRef,createdAt,updatedAt,owner,languages,"
             "repositoryTopics",
@@ -53,14 +65,7 @@ class IntegrationHostBridge:
         ],
     }
 
-    _GITHUB_WRITE_OPS = frozenset({
-        "create_milestone", "create_issue", "create_issues",
-        "setup_sprint", "add_issue_to_project", "create_project",
-        "update_issue", "update_milestone",
-    })
-    _GITHUB_ALL_OPS: frozenset = frozenset(
-        list(_GITHUB_READ_OPS.keys()) + list(_GITHUB_WRITE_OPS)
-    )
+    _GITHUB_ALL_OPS: frozenset = ALL_GITHUB_OPERATIONS
 
     def __init__(self, error_logger: ErrorLogger | None = None,
                  repo_root: str | None = None) -> None:
@@ -485,6 +490,10 @@ class IntegrationHostBridge:
             return receipt
         handler = self._resolve_write_handler(proposal.operation)
         if handler is not None:
+            scope_error = IntegrationHostBridge._check_github_scopes(proposal.operation)
+            if scope_error is not None:
+                self._log_if_failed(action, scope_error)
+                return scope_error
             receipt = handler(self, action)
             self._log_if_failed(action, receipt)
             return receipt
@@ -608,11 +617,17 @@ class IntegrationHostBridge:
 
     def _log_if_failed(self, action: ApprovedAction, receipt: DispatchReceipt) -> None:
         if receipt.exit_code and receipt.exit_code != 0:
+            error_text = receipt.stderr or receipt.message
+            is_scope_error = (
+                receipt.error_category == "missing_scope"
+                or "missing required scopes" in error_text
+            )
             self._log_error(
                 action=action,
-                error=receipt.stderr or receipt.message,
+                error=error_text,
                 exit_code=receipt.exit_code,
                 category="action_failure",
+                retryable=is_scope_error,
                 user_message=receipt.message,
             )
 
@@ -735,10 +750,63 @@ class IntegrationHostBridge:
         )
 
     @staticmethod
+    def _check_github_scopes(operation: str) -> DispatchReceipt | None:
+        """Preflight permission check based on the integration capability model.
+
+        Returns a clear, user-action-required failure when the current token does
+        not grant the capabilities an action needs. Returns None when the action
+        needs no capabilities, `gh` is unavailable, or granted scopes cannot be
+        determined (in which case failures surface at execution time instead).
+        """
+        required = required_capabilities(operation)
+        if not required:
+            return None
+        executable = shutil.which("gh")
+        if executable is None:
+            return None
+        try:
+            completed = subprocess.run(
+                [executable, "auth", "status"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        output = completed.stdout + completed.stderr
+        scopes = parse_token_scopes(output)
+        if scopes is None:
+            # Could not determine granted scopes; rely on runtime error classification.
+            return None
+        granted = capabilities_from_scopes(scopes)
+        missing = required - granted
+        if not missing:
+            return None
+        needed_scopes = scopes_for_capabilities(missing)
+        scopes_str = ",".join(sorted(needed_scopes))
+        missing_caps = ", ".join(sorted(cap.value for cap in missing))
+        return DispatchReceipt(
+            correlation_id=None,
+            dispatched=True,
+            completed=True,
+            exit_code=1,
+            error_category="missing_scope",
+            message=(
+                f"GitHub action '{operation}' requires capabilities [{missing_caps}] "
+                f"which are not granted by the current token.\n"
+                f"Fix: Run:  gh auth refresh -s {scopes_str}"
+            ),
+            stderr=f"missing required scopes [{scopes_str}]",
+        )
+
+    @staticmethod
     def _execute_github_read(
         action: ApprovedAction,
         args_builder: Callable[[dict], list[str]],
     ) -> DispatchReceipt:
+        scope_error = IntegrationHostBridge._check_github_scopes(action.proposal.operation)
+        if scope_error is not None:
+            return scope_error
         executable = shutil.which("gh")
         if executable is None:
             return DispatchReceipt(
@@ -792,6 +860,15 @@ class IntegrationHostBridge:
         stderr = completed.stderr.strip()
         if completed.returncode != 0:
             msg = f"GitHub read action '{action.proposal.operation}' failed (exit {completed.returncode})."
+            text = f"{msg}\n{stderr}".lower()
+            permission_failure = (
+                "missing required scopes" in stderr
+                or "http 401" in text
+                or "http 403" in text
+                or "permission denied" in text
+                or "unauthorized" in text
+                or "forbidden" in text
+            )
             if "missing required scopes" in stderr:
                 m = re.search(r"missing required scopes \[([^\]]+)\]", stderr)
                 scopes = m.group(1) if m else "unknown"
@@ -805,6 +882,7 @@ class IntegrationHostBridge:
                 dispatched=True,
                 completed=True,
                 exit_code=completed.returncode,
+                error_category="missing_scope" if permission_failure else None,
                 message=msg,
                 stdout=stdout,
                 stderr=stderr,
@@ -857,6 +935,15 @@ class IntegrationHostBridge:
             )
         if rc != 0:
             msg = failure_msg or f"GitHub action '{operation}' failed (exit {rc})."
+            text = f"{msg}\n{stderr}".lower()
+            permission_failure = (
+                "missing required scopes" in stderr
+                or "http 401" in text
+                or "http 403" in text
+                or "permission denied" in text
+                or "unauthorized" in text
+                or "forbidden" in text
+            )
             if "missing required scopes" in stderr:
                 m = re.search(r"missing required scopes \[([^\]]+)\]", stderr)
                 scopes = m.group(1) if m else "unknown"
@@ -870,6 +957,7 @@ class IntegrationHostBridge:
                 dispatched=True,
                 completed=True,
                 exit_code=rc,
+                error_category="missing_scope" if permission_failure else None,
                 message=msg,
                 stdout=stdout,
                 stderr=stderr,

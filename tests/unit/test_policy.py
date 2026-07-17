@@ -184,3 +184,140 @@ def test_blocks_credentials_inside_authentication_payload():
         )
     )
     assert not result.allowed
+
+
+def test_bash_accepts_cmd_key_in_payload():
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.BASH, "inspect", {"cmd": "cat /etc/hosts"}, "filesystem")
+    )
+    assert result.allowed
+    assert result.risk_level == "medium"
+
+
+def test_bash_accepts_shell_command_key_in_payload():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.BASH, "inspect", {"shell_command": "ls -la /tmp"}, "filesystem"
+        )
+    )
+    assert result.allowed
+
+
+def test_bash_accepts_filesystem_in_tool_category():
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.BASH, "inspect", {"command": "pwd"}, "filesystem")
+    )
+    assert result.allowed
+
+
+def test_bash_blocks_empty_payload():
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.BASH, "inspect", {}, "filesystem")
+    )
+    assert not result.allowed
+    assert "command" in result.reason.lower()
+
+
+def test_bash_allows_ls_cat_head_tail_find():
+    policy = ActionPolicy()
+    for cmd in ["ls /tmp", "cat /etc/hosts", "head -5 file.txt", "tail -5 file.txt", "find . -name '*.py'"]:
+        result = policy.evaluate(
+            candidate(ActionType.BASH, "inspect", {"command": cmd}, "filesystem")
+        )
+        assert result.allowed, f"Expected {cmd} to be allowed"
+
+
+_VALID_GITHUB_PAYLOADS = {
+    "inspect_repository": {"repository": "o/r"},
+    "read_repository": {"repository": "o/r"},
+    "list_issues": {"repository": "o/r"},
+    "list_milestones": {"repository": "o/r"},
+    "list_projects": {"repository": "o/r"},
+    "list_pull_requests": {"repository": "o/r"},
+    "list_releases": {"repository": "o/r"},
+    "create_milestone": {"repository": "o/r", "milestone": {"title": "t"}},
+    "update_milestone": {"repository": "o/r", "milestone": {"number": 3, "title": "t"}},
+    "create_issue": {"repository": "o/r", "issue": {"title": "t", "body": "b"}},
+    "update_issue": {"repository": "o/r", "issue": {"number": 1, "title": "t", "body": "b"}},
+    "create_issues": {"repository": "o/r", "issues": [{"title": "t", "body": "b"}]},
+    "setup_sprint": {
+        "repository": "o/r",
+        "sprint": {"title": "t", "goal": "g", "start_date": "2026-01-01", "end_date": "2026-01-02"},
+    },
+    "add_issue_to_project": {"repository": "o/r", "project_number": 1, "issue_numbers": [1]},
+    "create_project": {"repository": "o/r", "name": "n"},
+    "create_project_item": {"repository": "o/r", "project_number": 1, "issue_numbers": [1]},
+}
+
+
+@pytest.mark.parametrize(
+    "operation,payload",
+    list(_VALID_GITHUB_PAYLOADS.items()),
+)
+def test_policy_accepts_every_registered_github_action(operation, payload):
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.GITHUB, operation, payload, "github")
+    )
+    assert result.allowed, f"{operation} should be allowed: {result.reason}"
+    assert result.risk_level in {"medium", "high"}
+
+
+def test_policy_rejects_unknown_github_operation():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.GITHUB,
+            "frobnicate",
+            {"repository": "o/r"},
+            "github",
+        )
+    )
+    assert not result.allowed
+    assert "Unknown GitHub operation" in result.reason
+    assert "frobnicate" in result.reason
+
+
+def test_policy_rejects_update_milestone_without_number():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.GITHUB,
+            "update_milestone",
+            {"repository": "o/r", "milestone": {"title": "t"}},
+            "github",
+        )
+    )
+    assert not result.allowed
+    assert "number" in result.reason.lower()
+
+
+def test_policy_rejects_update_issue_without_number():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.GITHUB,
+            "update_issue",
+            {"repository": "o/r", "issue": {"title": "t", "body": "b"}},
+            "github",
+        )
+    )
+    assert not result.allowed
+    assert "number" in result.reason.lower()
+
+
+def test_policy_rejects_github_action_missing_repository():
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.GITHUB, "list_issues", {}, "github")
+    )
+    assert not result.allowed
+    assert "repository" in result.reason.lower()
+
+
+def test_policy_rejects_malformed_update_milestone_payload():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.GITHUB,
+            "update_milestone",
+            {"repository": "o/r", "milestone": {"number": -1, "title": ""}},
+            "github",
+        )
+    )
+    assert not result.allowed
+
