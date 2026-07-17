@@ -62,6 +62,13 @@ class ConversationService:
         try:
             response = self.parser.parse(result.content)
         except ResponseValidationError as first_error:
+            content_preview = result.content[:200] if result.content else "<empty>"
+            if not result.content or result.content.strip() in ("{}", ""):
+                raise ResponseValidationError(
+                    f"Model returned empty or minimal response. "
+                    f"Content received: {content_preview}. "
+                    f"Original error: {first_error}"
+                ) from first_error
             try:
                 repair = self._generate(
                     ModelRequest(
@@ -75,7 +82,14 @@ class ConversationService:
                 )
             except ConnectionError as exc:
                 raise ConnectionError(f"Model connection failed during repair: {exc}") from exc
-            response = self.parser.parse(repair.content)
+            try:
+                response = self.parser.parse(repair.content)
+            except ResponseValidationError as repair_error:
+                raise ResponseValidationError(
+                    f"Model response could not be parsed (repair also failed). "
+                    f"First error: {first_error}. "
+                    f"Repair error: {repair_error}"
+                ) from repair_error
 
         stored_actions = []
         approved_candidates = []

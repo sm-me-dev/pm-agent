@@ -26,7 +26,18 @@ def load_env_file(path: str | Path | None = None, project_root: Path | None = No
     elif project_root:
         env_path = project_root / ".env"
     else:
-        env_path = Path.cwd() / ".env"
+        candidates = [
+            Path.cwd() / ".env",
+            Path.home() / ".env",
+            Path.home() / ".config" / "pm-agent" / ".env",
+        ]
+        env_path = None
+        for candidate in candidates:
+            if candidate.is_file():
+                env_path = candidate
+                break
+        if env_path is None:
+            return None
     if not env_path.is_file():
         return None
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():

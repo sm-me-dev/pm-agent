@@ -44,6 +44,7 @@ from pm_agent.presentation.renderers import (
     summary_markdown,
 )
 from pm_agent.presentation.streaming import StreamingDisplay
+from pm_agent.prompts.parser import ResponseValidationError
 
 
 @dataclass
@@ -217,6 +218,18 @@ class PMAgentREPL:
                     )
                 )
                 self._log_orchestration_error(exc, retryable=True, category="model_connection_error")
+                return
+            except ResponseValidationError as exc:
+                self.console.print(
+                    Panel(
+                        f"Model returned an invalid response: {exc}\n\n"
+                        "The model may not support the required response format, "
+                        "or may be overloaded. Try again or check your model configuration.",
+                        title="Model Response Error",
+                        border_style="red",
+                    )
+                )
+                self._log_orchestration_error(exc, retryable=True, category="model_response_error")
                 return
             except Exception as exc:
                 self.console.print(f"[bold red]Request failed:[/] {exc}")

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5 (2026-07-17)
+
+### Fixed
+- `load_env_file()` now searches `~/.env` and `~/.config/pm-agent/.env` in addition to `cwd/.env`, so PM_* env vars are picked up from more locations.
+- `ResponseValidationError` now shows a clear "Model Response Error" panel instead of "Unexpected error".
+- Empty model responses produce a specific error message ("Model returned empty or minimal response") instead of a generic parse error.
+
 ## 0.3.4 (2026-07-17)
 
 ### Fixed

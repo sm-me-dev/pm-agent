@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "product-manager-agent"
-version = "0.3.4"
+version = "0.3.5"
 description = "Stateful Technical PM Agent — multi-project CLI with persistent per-project context"
 readme = "README.md"
 requires-python = ">=3.12"
