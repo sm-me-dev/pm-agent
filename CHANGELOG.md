@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.7 (2026-07-17)
+
+### Fixed
+- `load_env_file()` now also loads `.env` from the project's `.pm-agent/` directory after project discovery, so per-project env vars are picked up automatically.
+
 ## 0.3.6 (2026-07-17)
 
 ### Fixed
