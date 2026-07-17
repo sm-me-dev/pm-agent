@@ -1,0 +1,58 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "analysis",
+    "risks",
+    "recommendations",
+    "decisions",
+    "actions_requiring_approval"
+  ],
+  "properties": {
+    "summary": {"type": "string"},
+    "analysis": {"type": "string"},
+    "risks": {"type": "array", "maxItems": 12, "items": {"type": "string"}},
+    "recommendations": {"type": "array", "maxItems": 12, "items": {"type": "string"}},
+    "decisions": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["topic", "title", "decision", "reason", "status"],
+        "properties": {
+          "topic": {"type": "string"},
+          "title": {"type": "string"},
+          "decision": {"type": "string"},
+          "reason": {"type": "string"},
+          "status": {"type": "string", "enum": ["proposed", "rejected"]}
+        }
+      }
+    },
+    "actions_requiring_approval": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action_type",
+          "tool_category",
+          "operation",
+          "reason",
+          "impact",
+          "payload"
+        ],
+        "properties": {
+          "action_type": {"type": "string", "enum": ["bash", "git", "github", "mcp"]},
+          "tool_category": {"type": "string"},
+          "operation": {"type": "string"},
+          "reason": {"type": "string"},
+          "impact": {"type": "string"},
+          "payload": {"type": "object"}
+        }
+      }
+    }
+  }
+}

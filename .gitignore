@@ -41,8 +41,8 @@ session-*.md
 logs/
 *.log
 
-# Stale compatibility shims (pre-0.2)
-pm_agent/
+# Stale compatibility shims (pre-0.2, top-level only)
+/pm_agent/
 
 # Development docs (not shipped)
 context/
