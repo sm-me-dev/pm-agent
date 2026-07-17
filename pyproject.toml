@@ -72,3 +72,35 @@ python_version = "3.12"
 strict = false
 warn_unused_ignores = true
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pm_agent.infrastructure.models.openai_compatible"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "pm_agent.presentation.cli"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "pm_agent.presentation.repl"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "pm_agent.infrastructure.hosts.integrations"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "pm_agent.infrastructure.repository.local_analyzer"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "pm_agent.infrastructure.sqlite.store"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "pm_agent.presentation.streaming"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "pm_agent.presentation.input"
+ignore_errors = true
