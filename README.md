@@ -85,10 +85,8 @@ uses it to install `pm-agent` into an isolated environment.
 ### pipx (any platform)
 
 ```bash
-pipx install pm-agent
+pipx install product-manager-agent
 ```
-
-Once published to PyPI. Until then, install from source (see below).
 
 ### From source
 

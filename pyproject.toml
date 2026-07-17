@@ -1,22 +1,25 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools >= 77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pm-agent"
+name = "product-manager-agent"
 version = "0.3.0"
 description = "Stateful Technical PM Agent — multi-project CLI with persistent per-project context"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
+license-files = ["LICEN[CS]E*"]
 authors = [{ name = "Sm_mE", email = "mohammad79eshrati@gmail.com" }]
 keywords = ["ai", "agent", "pm", "orchestrator", "llm", "project-management"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development",
     "Environment :: Console",
+    "Operating System :: OS Independent",
 ]
 dependencies = [
     "openai>=1.60.0",
@@ -28,6 +31,7 @@ dependencies = [
 Homepage = "https://github.com/sm-me-dev/pm-agent"
 Source = "https://github.com/sm-me-dev/pm-agent"
 Issues = "https://github.com/sm-me-dev/pm-agent/issues"
+Changelog = "https://github.com/sm-me-dev/pm-agent/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
