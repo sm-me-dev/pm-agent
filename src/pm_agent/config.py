@@ -21,24 +21,14 @@ def project_root() -> Path:
 
 
 def load_env_file(path: str | Path | None = None, project_root: Path | None = None) -> Path | None:
+    env_path: Path | None
     if path:
         env_path = Path(path).expanduser()
     elif project_root:
         env_path = project_root / ".env"
     else:
-        candidates = [
-            Path.cwd() / ".env",
-            Path.home() / ".env",
-            Path.home() / ".config" / "pm-agent" / ".env",
-        ]
-        env_path = None
-        for candidate in candidates:
-            if candidate.is_file():
-                env_path = candidate
-                break
-        if env_path is None:
-            return None
-    if not env_path.is_file():
+        env_path = _find_env_file()
+    if env_path is None or not env_path.is_file():
         return None
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -55,6 +45,18 @@ def load_env_file(path: str | Path | None = None, project_root: Path | None = No
             value = value[1:-1]
         os.environ.setdefault(key, value)
     return env_path
+
+
+def _find_env_file() -> Path | None:
+    candidates = [
+        Path.cwd() / ".env",
+        Path.home() / ".env",
+        Path.home() / ".config" / "pm-agent" / ".env",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _env(*names: str, default: str = "") -> str:
