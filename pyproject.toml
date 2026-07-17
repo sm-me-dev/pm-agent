@@ -14,7 +14,6 @@ keywords = ["ai", "agent", "pm", "orchestrator", "llm", "project-management"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development",
     "Environment :: Console",
