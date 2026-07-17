@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .enums import ActionStatus, ActionType, DecisionStatus, MemoryKind
+from .enums import ActionStatus, ActionType, DecisionStatus, MemoryKind, TaskClass
 
 
 def new_id() -> str:
@@ -222,6 +222,21 @@ class DecisionCandidate:
 
 
 @dataclass(frozen=True)
+class ExecutionNeeds:
+    """How the agent should proceed with a task, surfaced in the model response.
+
+    ``classification`` is one of :class:`TaskClass`. The remaining fields make
+    the agent's stance explicit so the REPL and tests can verify the agent is
+    not offloading work it could do itself.
+    """
+
+    classification: TaskClass
+    assumptions: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+    missing_access: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class PMResponse:
     summary: str
     analysis: str
@@ -229,6 +244,7 @@ class PMResponse:
     recommendations: list[str] = field(default_factory=list)
     decisions: list[DecisionCandidate] = field(default_factory=list)
     actions_requiring_approval: list[ActionCandidate] = field(default_factory=list)
+    execution_needs: ExecutionNeeds | None = None
 
 
 @dataclass(frozen=True)

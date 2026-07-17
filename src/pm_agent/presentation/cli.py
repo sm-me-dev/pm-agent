@@ -185,6 +185,20 @@ def build_repl(parsed: argparse.Namespace) -> PMAgentREPL:
 
     context_dir = parsed.context or None
 
+    # Recover project identity (memory + configured name) so the prompt always
+    # knows what the project is, instead of asking the user.
+    memory = ""
+    project_meta: dict = {}
+    try:
+        proj = discover_or_override(None, str(repo), repo)
+        if proj is not None:
+            memory = proj.memory or ""
+            configured_name = (proj.project_config or {}).get("project", {}).get("name")
+            if configured_name:
+                project_meta["name"] = configured_name
+    except Exception:  # pragma: no cover - discovery is best-effort
+        pass
+
     def _env(*names: str, default: str = "") -> str:
         for name in names:
             value = os.environ.get(name)
@@ -209,7 +223,7 @@ def build_repl(parsed: argparse.Namespace) -> PMAgentREPL:
     except Exception as exc:
         _die(f"Failed to open database: {exc}", 2)
 
-    project = store.resolve_project(repo, branch)
+    project = store.resolve_project(repo, branch, name=project_meta.get("name"))
     session_service = SessionService(store)
     session = session_service.start(
         project, model, _provider(base_url), branch,
@@ -220,7 +234,7 @@ def build_repl(parsed: argparse.Namespace) -> PMAgentREPL:
     error_logger = ErrorLogger(path=error_log_path) if error_log_path else ErrorLogger()
     host = IntegrationHostBridge(error_logger=error_logger, repo_root=str(repo))
     action_service = ActionService(store, host)
-    prompt_builder = PromptBuilder(context_dir)
+    prompt_builder = PromptBuilder(context_dir, memory=memory, project_meta=project_meta)
     services = REPLServices(
         store=store,
         conversation=ConversationService(

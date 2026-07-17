@@ -321,3 +321,74 @@ def test_policy_rejects_malformed_update_milestone_payload():
     )
     assert not result.allowed
 
+
+def test_policy_allows_sandboxed_write_document():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.MCP,
+            "write_document",
+            {"path": "docs/architecture.md", "content": "# Architecture"},
+            "filesystem",
+        )
+    )
+    assert result.allowed
+    assert result.risk_level == "medium"
+
+
+def test_policy_rejects_write_document_without_payload():
+    result = ActionPolicy().evaluate(
+        candidate(ActionType.MCP, "write_document", {}, "filesystem")
+    )
+    assert not result.allowed
+
+
+def test_policy_allows_create_issue_comment_with_valid_payload():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.GITHUB,
+            "create_issue_comment",
+            {"repository": "o/r", "issue_number": 7, "body": "Proposed MVP scope..."},
+            "github",
+        )
+    )
+    assert result.allowed
+
+
+def test_policy_rejects_create_issue_comment_without_body():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.GITHUB,
+            "create_issue_comment",
+            {"repository": "o/r", "issue_number": 7},
+            "github",
+        )
+    )
+    assert not result.allowed
+    assert "body" in result.reason.lower()
+
+
+def test_policy_allows_create_sub_issue_with_valid_payload():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.GITHUB,
+            "create_sub_issue",
+            {"repository": "o/r", "parent": 1, "title": "Auth flow", "body": "AC: ..."},
+            "github",
+        )
+    )
+    assert result.allowed
+
+
+def test_policy_rejects_create_sub_issue_without_parent():
+    result = ActionPolicy().evaluate(
+        candidate(
+            ActionType.GITHUB,
+            "create_sub_issue",
+            {"repository": "o/r", "title": "Auth flow"},
+            "github",
+        )
+    )
+    assert not result.allowed
+    assert "parent" in result.reason.lower()
+
+

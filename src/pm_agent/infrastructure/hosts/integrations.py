@@ -426,13 +426,15 @@ class IntegrationHostBridge:
         proposal = action.proposal
         is_github_op = proposal.operation in self._GITHUB_ALL_OPS
 
-        if proposal.action_type is ActionType.MCP and (
-            proposal.tool_category == "filesystem"
-            and proposal.operation in {"inspect_repository", "read_repository"}
-        ):
-            receipt = self._execute_mcp_inspect(action)
-            self._log_if_failed(action, receipt)
-            return receipt
+        if proposal.action_type is ActionType.MCP and proposal.tool_category == "filesystem":
+            if proposal.operation in {"inspect_repository", "read_repository"}:
+                receipt = self._execute_mcp_inspect(action)
+                self._log_if_failed(action, receipt)
+                return receipt
+            if proposal.operation == "write_document":
+                receipt = self._execute_mcp_write_document(action)
+                self._log_if_failed(action, receipt)
+                return receipt
 
         if self._is_github_type(proposal):
             if shutil.which("gh") is None:
@@ -512,6 +514,8 @@ class IntegrationHostBridge:
             "create_milestone": IntegrationHostBridge._dispatch_create_milestone,
             "create_issue": IntegrationHostBridge._dispatch_create_issue,
             "create_issues": IntegrationHostBridge._dispatch_create_issues,
+            "create_issue_comment": IntegrationHostBridge._dispatch_create_issue_comment,
+            "create_sub_issue": IntegrationHostBridge._dispatch_create_sub_issue,
             "setup_sprint": IntegrationHostBridge._dispatch_setup_sprint,
             "add_issue_to_project": IntegrationHostBridge._dispatch_add_issue_to_project,
             "create_project": IntegrationHostBridge._dispatch_create_project,
@@ -584,6 +588,74 @@ class IntegrationHostBridge:
                 exit_code=1,
                 message=f"Local repository inspection failed: {exc}",
                 stderr=str(exc),
+            )
+
+    _DOCUMENT_EXTENSIONS = frozenset({".md", ".txt", ".json", ".yaml", ".yml", ".rst"})
+
+    def _execute_mcp_write_document(self, action: ApprovedAction) -> DispatchReceipt:
+        proposal = action.proposal
+        path_str = str(proposal.payload.get("path", "")).strip()
+        content = str(proposal.payload.get("content", ""))
+        if not path_str:
+            return DispatchReceipt(
+                correlation_id=action.proposal.id,
+                dispatched=True,
+                completed=True,
+                exit_code=1,
+                message="write_document requires a 'path' in the payload.",
+                error_category="invalid_payload",
+            )
+        target = Path(path_str)
+        if not target.is_absolute() and self._repo_root:
+            target = Path(self._repo_root).resolve() / target
+        target = target.resolve()
+        if self._repo_root:
+            allowed_root = Path(self._repo_root).resolve()
+            if not str(target).startswith(str(allowed_root)):
+                return DispatchReceipt(
+                    correlation_id=action.proposal.id,
+                    dispatched=True,
+                    completed=True,
+                    exit_code=1,
+                    message=f"Document path '{target}' is outside the allowed repository root.",
+                    stderr=str(target),
+                    error_category="path_outside_root",
+                )
+        if target.suffix.lower() not in self._DOCUMENT_EXTENSIONS:
+            return DispatchReceipt(
+                correlation_id=action.proposal.id,
+                dispatched=True,
+                completed=True,
+                exit_code=1,
+                message=(
+                    f"write_document only allows {sorted(self._DOCUMENT_EXTENSIONS)} "
+                    f"files, got '{target.suffix}'."
+                ),
+                error_category="invalid_extension",
+            )
+        try:
+            from pm_agent.infrastructure.security.redaction import redact_text
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(redact_text(content), encoding="utf-8")
+            return DispatchReceipt(
+                correlation_id=action.proposal.id,
+                dispatched=True,
+                completed=True,
+                exit_code=0,
+                message=f"Document written: {target}",
+                stdout=f"Document written: {target}",
+                result={"path": str(target)},
+            )
+        except Exception as exc:
+            return DispatchReceipt(
+                correlation_id=action.proposal.id,
+                dispatched=True,
+                completed=True,
+                exit_code=1,
+                message=f"Document write failed: {exc}",
+                stderr=str(exc),
+                error_category="write_failed",
             )
 
     def _log_error(
@@ -1103,6 +1175,78 @@ class IntegrationHostBridge:
             action, rc, stdout, stderr, cid,
             success_msg=f"Issue '{title}' created.",
             failure_msg=f"Failed to create issue '{title}'.",
+        )
+
+    @staticmethod
+    def _dispatch_create_issue_comment(
+        self: IntegrationHostBridge, action: ApprovedAction
+    ) -> DispatchReceipt:
+        payload = action.proposal.payload
+        repo = payload["repository"]
+        issue_number = payload.get("issue_number")
+        body = payload.get("body", "")
+        if not issue_number:
+            return DispatchReceipt(
+                correlation_id=uuid4().hex, dispatched=True, completed=True,
+                exit_code=1,
+                message="create_issue_comment requires 'issue_number' and 'body'.",
+                error_category="invalid_payload",
+            )
+        cid = uuid4().hex
+        rc, stdout, stderr = self._gh_api_post(
+            f"repos/{repo}/issues/{issue_number}/comments", {"body": body}
+        )
+        return self._make_receipt(
+            action, rc, stdout, stderr, cid,
+            success_msg=f"Comment posted on issue #{issue_number}.",
+            failure_msg=f"Failed to post comment on issue #{issue_number}.",
+        )
+
+    @staticmethod
+    def _dispatch_create_sub_issue(
+        self: IntegrationHostBridge, action: ApprovedAction
+    ) -> DispatchReceipt:
+        payload = action.proposal.payload
+        repo = payload["repository"]
+        parent = payload.get("parent")
+        title = payload.get("title", "")
+        body = payload.get("body", "")
+        if not parent:
+            return DispatchReceipt(
+                correlation_id=uuid4().hex, dispatched=True, completed=True,
+                exit_code=1,
+                message="create_sub_issue requires 'parent' (issue number) and 'title'.",
+                error_category="invalid_payload",
+            )
+        cid = uuid4().hex
+        rc, stdout, stderr = self._gh_api_post(
+            f"repos/{repo}/issues", {"title": title, "body": body}
+        )
+        if rc != 0:
+            return self._make_receipt(
+                action, rc, stdout, stderr, cid,
+                success_msg="", failure_msg=f"Failed to create sub-issue '{title}'.",
+            )
+        try:
+            created = json.loads(stdout) if stdout else {}
+            number = created.get("number")
+        except json.JSONDecodeError:
+            number = None
+        if number is not None:
+            link_rc, link_stdout, link_stderr = self._gh_api_post(
+                f"repos/{repo}/issues/{number}/sub_issues",
+                {"parent_issue_number": parent},
+            )
+            if link_rc != 0:
+                return self._make_receipt(
+                    action, link_rc, link_stdout, link_stderr, cid,
+                    success_msg=f"Sub-issue #{number} created (link to parent #{parent} failed).",
+                    failure_msg=f"Sub-issue #{number} created but linking to #{parent} failed.",
+                )
+        return self._make_receipt(
+            action, rc, stdout, stderr, cid,
+            success_msg=f"Sub-issue '{title}' created under #{parent}.",
+            failure_msg=f"Failed to create sub-issue '{title}'.",
         )
 
     @staticmethod

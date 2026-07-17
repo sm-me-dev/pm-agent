@@ -9,9 +9,16 @@ from pm_agent.domain.repository_refs import extract_github_references
 
 
 class PromptBuilder:
-    def __init__(self, context_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        context_dir: str | None = None,
+        memory: str | None = None,
+        project_meta: dict | None = None,
+    ) -> None:
         self.system_policy = files("pm_agent.prompts").joinpath("system.md").read_text()
         self.context_markdown = self._load_context(context_dir)
+        self.memory = memory or ""
+        self.project_meta = project_meta or {}
 
     @staticmethod
     def response_schema() -> dict:
@@ -24,14 +31,26 @@ class PromptBuilder:
         packet: ContextPacket,
         user_input: str,
     ) -> list[dict[str, str]]:
+        identity_lines = [
+            f"Name: {project.name}",
+            f"Path: {project.canonical_path}",
+            f"Branch: {branch}",
+        ]
+        configured_name = self.project_meta.get("name")
+        if configured_name:
+            identity_lines.append(f"Configured name: {configured_name}")
+        remote = self.project_meta.get("remote")
+        if remote:
+            identity_lines.append(f"Remote: {remote}")
         system_sections = [
             self.system_policy,
             "## Host Contract\nExternal actions are proposals only. The PM core cannot execute.",
-            (
-                "## Project\n"
-                f"Name: {project.name}\nPath: {project.canonical_path}\nBranch: {branch}"
-            ),
+            "## Project\n" + "\n".join(identity_lines),
         ]
+        if self.memory.strip():
+            system_sections.append(
+                "## Project Memory\n" + self.memory.strip()
+            )
         if self.context_markdown:
             system_sections.append(f"## Project Specifications\n{self.context_markdown}")
         if packet.items:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
+from pm_agent.application.decision_policy import DecisionPolicy
 from pm_agent.domain.enums import ActionStatus, DecisionStatus
 from pm_agent.domain.models import (
     PMResponse,
@@ -100,6 +101,17 @@ class ConversationService:
                     f"Repair error: {repair_error}"
                 ) from repair_error
 
+        # Make the agent's ask-vs-act stance explicit and surface regressions
+        # (e.g. delegating work it could do itself) as risks rather than asking.
+        needs = DecisionPolicy.classify(response)
+        warnings = DecisionPolicy.validate(response)
+        if warnings:
+            response = replace(
+                response, execution_needs=needs, risks=[*response.risks, *warnings]
+            )
+        else:
+            response = replace(response, execution_needs=needs)
+
         stored_actions = []
         approved_candidates = []
         blocked_operations: list[str] = []
@@ -158,7 +170,16 @@ class ConversationService:
                     reason,
                     candidate.payload,
                 )
-                blocked_operations.append(f"{proposal.operation} (reason: {reason})")
+                category = DecisionPolicy.categorize_block(proposal.operation)
+                if category == "external_access":
+                    blocked_operations.append(
+                        f"{proposal.operation} (blocked: missing external access/permission "
+                        f"- {reason})"
+                    )
+                else:
+                    blocked_operations.append(
+                        f"{proposal.operation} (blocked: needs approval - {reason})"
+                    )
 
         if blocked_operations or len(approved_candidates) != len(response.actions_requiring_approval):
             response = replace(

@@ -46,7 +46,9 @@ class SQLiteStore:
             apply_migrations(connection)
             self._import_legacy(connection)
 
-    def resolve_project(self, repo_path: str | Path, branch: str = "unknown") -> Project:
+    def resolve_project(
+        self, repo_path: str | Path, branch: str = "unknown", name: str | None = None
+    ) -> Project:
         canonical = str(Path(repo_path).resolve())
         now = utc_now()
         with self.factory.connect() as connection:
@@ -61,7 +63,7 @@ class SQLiteStore:
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (
                         project_id,
-                        Path(canonical).name,
+                        name or Path(canonical).name,
                         canonical,
                         project_fingerprint(canonical),
                         branch,
@@ -600,57 +602,14 @@ class SQLiteStore:
     def retrieve(self, query: RetrievalQuery) -> ContextPacket:
         recent = self.get_recent_messages(query.session_id, query.history_limit)
         snapshot = self.latest_snapshot(query.project_id)
-        terms = _FTS_TOKEN.findall(query.text.lower())
-        items: list[MemoryItem] = []
-        if terms:
-            fts_query = " OR ".join(f'"{term.replace(chr(34), "")}"' for term in terms[:12])
-            with self.factory.connect() as connection:
-                rows = connection.execute(
-                    """SELECT kind, source_id, title, content, created_at, status,
-                              bm25(memory_fts) AS rank
-                       FROM memory_fts
-                       WHERE memory_fts MATCH ? AND project_id = ?
-                       ORDER BY rank LIMIT ?""",
-                    (fts_query, query.project_id, query.item_limit * 3),
-                ).fetchall()
-            weights = {
-                MemoryKind.DECISION.value: 5.0,
-                MemoryKind.REPO_NOTE.value: 4.0,
-                MemoryKind.SUMMARY.value: 3.0,
-                MemoryKind.ACTION_OUTCOME.value: 2.0,
-                MemoryKind.MESSAGE.value: 1.0,
-            }
-            for row in rows:
-                if row["kind"] == MemoryKind.DECISION.value and row["status"] != "accepted":
-                    continue
-                try:
-                    age_days = max(
-                        0.0,
-                        (
-                            datetime.now(UTC)
-                            - datetime.fromisoformat(row["created_at"]).astimezone(UTC)
-                        ).total_seconds()
-                        / 86_400,
-                    )
-                except (TypeError, ValueError):
-                    age_days = 365.0
-                recency = 1.0 / (1.0 + age_days / 30.0)
-                score = (
-                    weights.get(row["kind"], 0.0)
-                    + max(0.0, -float(row["rank"]))
-                    + recency
-                )
-                items.append(
-                    MemoryItem(
-                        kind=MemoryKind(row["kind"]),
-                        source_id=row["source_id"],
-                        title=row["title"],
-                        content=row["content"],
-                        created_at=row["created_at"],
-                        score=score,
-                    )
-                )
-        items.sort(key=lambda item: (item.score, item.created_at), reverse=True)
+        fts_items = self._retrieve_fts(query)
+        identity_items = self._retrieve_project_identity(query.project_id)
+        merged: dict[tuple[MemoryKind, str], MemoryItem] = {}
+        for item in (*identity_items, *fts_items):
+            key = (item.kind, item.source_id)
+            if key not in merged or item.score > merged[key].score:
+                merged[key] = item
+        items = sorted(merged.values(), key=lambda item: (item.score, item.created_at), reverse=True)
         bounded: list[MemoryItem] = []
         used = 0
         for item in items:
@@ -662,6 +621,121 @@ class SQLiteStore:
             if len(bounded) >= query.item_limit:
                 break
         return ContextPacket(items=bounded, recent_messages=recent, repository_snapshot=snapshot)
+
+    def _retrieve_fts(self, query: RetrievalQuery) -> list[MemoryItem]:
+        terms = _FTS_TOKEN.findall(query.text.lower())
+        if not terms:
+            return []
+        fts_query = " OR ".join(f'"{term.replace(chr(34), "")}"' for term in terms[:12])
+        with self.factory.connect() as connection:
+            rows = connection.execute(
+                """SELECT kind, source_id, title, content, created_at, status,
+                          bm25(memory_fts) AS rank
+                   FROM memory_fts
+                   WHERE memory_fts MATCH ? AND project_id = ?
+                   ORDER BY rank LIMIT ?""",
+                (fts_query, query.project_id, query.item_limit * 3),
+            ).fetchall()
+        weights = {
+            MemoryKind.DECISION.value: 5.0,
+            MemoryKind.REPO_NOTE.value: 4.0,
+            MemoryKind.SUMMARY.value: 3.0,
+            MemoryKind.ACTION_OUTCOME.value: 2.0,
+            MemoryKind.MESSAGE.value: 1.0,
+        }
+        items: list[MemoryItem] = []
+        for row in rows:
+            if row["kind"] == MemoryKind.DECISION.value and row["status"] != "accepted":
+                continue
+            try:
+                age_days = max(
+                    0.0,
+                    (
+                        datetime.now(UTC)
+                        - datetime.fromisoformat(row["created_at"]).astimezone(UTC)
+                    ).total_seconds()
+                    / 86_400,
+                )
+            except (TypeError, ValueError):
+                age_days = 365.0
+            recency = 1.0 / (1.0 + age_days / 30.0)
+            score = weights.get(row["kind"], 0.0) + max(0.0, -float(row["rank"])) + recency
+            items.append(
+                MemoryItem(
+                    kind=MemoryKind(row["kind"]),
+                    source_id=row["source_id"],
+                    title=row["title"],
+                    content=row["content"],
+                    created_at=row["created_at"],
+                    score=score,
+                )
+            )
+        return items
+
+    def _retrieve_project_identity(self, project_id: str) -> list[MemoryItem]:
+        """Always-on project context, independent of the user's literal input.
+
+        Guarantees the model knows the project even when full-text retrieval finds
+        nothing: the latest session summaries, the latest planning/context notes, and
+        the latest decisions (including proposed/deferred ones, which are the bulk of
+        product-manager state and were previously invisible on later turns).
+
+        Identity items are given a high base score so they survive the character
+        budget before lower-priority FTS matches.
+        """
+        items: list[MemoryItem] = []
+        with self.factory.connect() as connection:
+            summaries = connection.execute(
+                """SELECT id, narrative, created_at FROM session_summaries
+                   WHERE project_id = ? ORDER BY created_at DESC LIMIT 3""",
+                (project_id,),
+            ).fetchall()
+            for row in summaries:
+                items.append(
+                    MemoryItem(
+                        kind=MemoryKind.SUMMARY,
+                        source_id=row["id"],
+                        title="Session summary",
+                        content=row["narrative"] or "",
+                        created_at=row["created_at"],
+                        score=12.0,
+                    )
+                )
+            notes = connection.execute(
+                """SELECT id, category, title, content, created_at
+                   FROM repository_notes WHERE project_id = ?
+                   ORDER BY created_at DESC LIMIT 8""",
+                (project_id,),
+            ).fetchall()
+            for row in notes:
+                items.append(
+                    MemoryItem(
+                        kind=MemoryKind.REPO_NOTE,
+                        source_id=row["id"],
+                        title=row["title"] or row["category"],
+                        content=row["content"] or "",
+                        created_at=row["created_at"],
+                        score=11.0,
+                    )
+                )
+            decisions = connection.execute(
+                """SELECT id, topic, title, decision, reason, created_at
+                   FROM decisions_v2 WHERE project_id = ?
+                   ORDER BY created_at DESC LIMIT 10""",
+                (project_id,),
+            ).fetchall()
+            for row in decisions:
+                items.append(
+                    MemoryItem(
+                        kind=MemoryKind.DECISION,
+                        source_id=row["id"],
+                        title=f"{row['topic']} | {row['title']}",
+                        content=f"{row['decision']}\nReason: {row['reason']}",
+                        created_at=row["created_at"],
+                        score=10.0,
+                    )
+                )
+        return items
 
     def add_approval_rule(self, rule: ApprovalRule) -> None:
         with self.factory.connect() as connection:
