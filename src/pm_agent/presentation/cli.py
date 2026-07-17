@@ -256,6 +256,9 @@ def _start_repl(parsed: argparse.Namespace) -> int:
         cwd=Path.cwd(),
     )
 
+    if proj and proj.is_initialized and proj.pm_agent_dir:
+        load_env_file(path=str(proj.pm_agent_dir / ".env"))
+
     if proj is None:
         if getattr(parsed, "repo", None) is not None:
             db_path = _final_db_path(None, parsed)
