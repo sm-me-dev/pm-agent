@@ -150,7 +150,7 @@ def test_github_list_issues_is_dispatched_and_succeeded(tmp_path, monkeypatch):
     assert len(receipt.result) > 0
     assert receipt.result[0]["number"] == 1
     assert store.get_action(proposal.id).status.value == "succeeded"
-    assert "issue" in calls[0] and "list" in calls[0]
+    assert any("issue" in c and "list" in c for c in calls)
 
 
 def test_github_inspect_repository_is_dispatched_and_succeeded(tmp_path, monkeypatch):
@@ -678,9 +678,12 @@ def test_github_create_project_is_dispatched(tmp_path, monkeypatch):
         lambda executable: "/usr/bin/gh" if executable == "gh" else None,
     )
 
+    # Creating a project requires the `project` scope (write_projects capability).
+    _PROJECT_SCOPES = _SCOPES_OUTPUT.replace("'repo'", "'repo', 'project'")
+
     def fake_run(command, **kwargs):
         if "auth" in command and "status" in command:
-            return SimpleNamespace(returncode=0, stdout=_SCOPES_OUTPUT, stderr="")
+            return SimpleNamespace(returncode=0, stdout=_PROJECT_SCOPES, stderr="")
         return SimpleNamespace(
             returncode=0,
             stdout="Created project 'My Board'.",

@@ -47,7 +47,6 @@ from pm_agent.presentation.renderers import (
 from pm_agent.presentation.streaming import StreamingDisplay
 from pm_agent.prompts.parser import ResponseValidationError
 
-
 MAX_RECOVERY_ATTEMPTS = 3
 
 

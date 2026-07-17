@@ -6,6 +6,11 @@ import shlex
 from dataclasses import dataclass
 from typing import Any
 
+from .actions import (
+    ALL_GITHUB_OPERATIONS,
+    GITHUB_ACTIONS,
+    GITHUB_AUTH_OPERATIONS,
+)
 from .enums import ActionType
 from .models import ActionCandidate
 
@@ -37,45 +42,6 @@ _WRITE_OPERATIONS = {
     "truncate", "write",
 }
 _SHELL_META = re.compile(r"(?:^|[^\\])(?:[>|;&]|\$\(|`)")
-_READ_OPERATION_WORDS = {
-    "audit",
-    "describe",
-    "diff",
-    "discover",
-    "get",
-    "history",
-    "inspect",
-    "issues",
-    "list",
-    "log",
-    "milestones",
-    "projects",
-    "pull",
-    "pulls",
-    "read",
-    "releases",
-    "repository",
-    "requests",
-    "search",
-    "show",
-    "status",
-    "tasks",
-    "view",
-}
-_GITHUB_PLANNING_OPERATIONS = {
-    "add_issue_to_project",
-    "create_issue",
-    "create_issues",
-    "create_milestone",
-    "create_project",
-    "create_project_item",
-    "setup_sprint",
-    "update_issue",
-    "update_milestone",
-}
-_GITHUB_AUTH_OPERATIONS = {"authenticate_browser", "disconnect"}
-
-
 class ActionPolicy:
     def evaluate(self, candidate: ActionCandidate) -> PolicyDecision:
         operation = candidate.operation.strip().lower().replace("-", "_")
@@ -120,6 +86,60 @@ class ActionPolicy:
         if not decision.allowed:
             raise PolicyViolation(decision.reason)
         return decision.risk_level
+
+    def _evaluate_github(
+        self, operation: str, payload: dict[str, Any]
+    ) -> PolicyDecision:
+        if operation in GITHUB_AUTH_OPERATIONS:
+            hostname = str(payload.get("hostname", "github.com")).strip().lower()
+            protocol = str(payload.get("git_protocol", "https")).strip().lower()
+            if hostname != "github.com" or protocol not in {"https", "ssh"}:
+                return PolicyDecision(
+                    False,
+                    "blocked",
+                    "GitHub authentication is limited to github.com and https/ssh.",
+                )
+            if any(key in payload for key in {"token", "password", "secret", "api_key"}):
+                return PolicyDecision(
+                    False,
+                    "blocked",
+                    "Authentication payloads must never contain credentials.",
+                )
+            return PolicyDecision(
+                True,
+                "high",
+                "Browser authentication changes local GitHub CLI credentials and requires approval.",
+            )
+        action = GITHUB_ACTIONS.get(operation)
+        if action is None:
+            supported = ", ".join(sorted(ALL_GITHUB_OPERATIONS))
+            return PolicyDecision(
+                False,
+                "blocked",
+                f"Unknown GitHub operation '{operation}'. "
+                f"Supported operations: {supported}.",
+            )
+        repository = str(payload.get("repository", payload.get("repo", ""))).strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]+", repository):
+            return PolicyDecision(
+                False,
+                "blocked",
+                "GitHub actions require an explicit owner/repository payload.",
+            )
+        if action.kind == "read":
+            return PolicyDecision(True, "medium", "Read-only GitHub access requires approval.")
+        validation_error = self._validate_github_planning_payload(operation, payload)
+        if validation_error:
+            return PolicyDecision(
+                False,
+                "blocked",
+                f"GitHub action '{operation}' is missing required parameters: {validation_error}",
+            )
+        return PolicyDecision(
+            True,
+            "high",
+            "GitHub planning mutation requires explicit payload-specific approval.",
+        )
 
     def _evaluate_git(self, payload: dict[str, Any]) -> PolicyDecision:
         command = str(payload.get("command", "")).strip()
@@ -167,57 +187,6 @@ class ActionPolicy:
             )
         return PolicyDecision(True, "medium", "Read-only shell inspection requires approval.")
 
-    def _evaluate_github(
-        self, operation: str, payload: dict[str, Any]
-    ) -> PolicyDecision:
-        if operation in _GITHUB_AUTH_OPERATIONS:
-            hostname = str(payload.get("hostname", "github.com")).strip().lower()
-            protocol = str(payload.get("git_protocol", "https")).strip().lower()
-            if hostname != "github.com" or protocol not in {"https", "ssh"}:
-                return PolicyDecision(
-                    False,
-                    "blocked",
-                    "GitHub authentication is limited to github.com and https/ssh.",
-                )
-            if any(key in payload for key in {"token", "password", "secret", "api_key"}):
-                return PolicyDecision(
-                    False,
-                    "blocked",
-                    "Authentication payloads must never contain credentials.",
-                )
-            return PolicyDecision(
-                True,
-                "high",
-                "Browser authentication changes local GitHub CLI credentials and requires approval.",
-            )
-        repository = str(payload.get("repository", payload.get("repo", ""))).strip()
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]+", repository):
-            return PolicyDecision(
-                False,
-                "blocked",
-                "GitHub actions require an explicit owner/repository payload.",
-            )
-        if operation in _GITHUB_PLANNING_OPERATIONS:
-            validation_error = self._validate_github_planning_payload(operation, payload)
-            if validation_error:
-                return PolicyDecision(False, "blocked", validation_error)
-            return PolicyDecision(
-                True,
-                "high",
-                "GitHub planning mutation requires explicit payload-specific approval.",
-            )
-        words = {part for part in operation.split("_") if part}
-        if words and words <= _READ_OPERATION_WORDS and words & {
-            "audit", "describe", "discover", "get", "inspect", "list", "read", "search",
-            "show", "status", "view",
-        }:
-            return PolicyDecision(True, "medium", "Read-only GitHub access requires approval.")
-        return PolicyDecision(
-            False,
-            "blocked",
-            "Unsupported GitHub operation; only inspection and issue/milestone planning are allowed.",
-        )
-
     @staticmethod
     def _validate_github_planning_payload(
         operation: str, payload: dict[str, Any]
@@ -231,6 +200,13 @@ class ActionPolicy:
                 return "GitHub issue actions require an exact issue title."
             if not populated_string(issue.get("body")):
                 return "GitHub issue actions require an exact issue body."
+            if operation == "update_issue":
+                number = issue.get("number", payload.get("issue_number"))
+                if not isinstance(number, int) or number <= 0:
+                    return (
+                        "update_issue requires a positive integer issue number "
+                        "(issue.number or issue_number)."
+                    )
         elif operation == "create_issues":
             issues = payload.get("issues")
             if not isinstance(issues, list) or not issues:
@@ -246,6 +222,13 @@ class ActionPolicy:
             milestone = payload.get("milestone", payload.get("sprint", payload))
             if not isinstance(milestone, dict) or not populated_string(milestone.get("title")):
                 return "Sprint and milestone actions require an exact title."
+            if operation == "update_milestone":
+                number = milestone.get("number", payload.get("milestone_number"))
+                if not isinstance(number, int) or number <= 0:
+                    return (
+                        "update_milestone requires a positive integer milestone number "
+                        "(milestone.number or milestone_number)."
+                    )
             if operation == "setup_sprint" and not all(
                 populated_string(milestone.get(field))
                 for field in ("goal", "start_date", "end_date")
@@ -284,13 +267,6 @@ class ActionPolicy:
                 )
         return None
 
-    _GITHUB_OPS = frozenset({
-        "add_issue_to_project", "create_issue", "create_issues", "create_milestone",
-        "create_project", "inspect_repository", "list_issues", "list_milestones",
-        "list_projects", "list_pull_requests", "list_releases", "setup_sprint",
-        "update_issue", "update_milestone",
-    })
-
     def _evaluate_mcp(
         self, category: str, operation: str, payload: dict[str, Any]
     ) -> PolicyDecision:
@@ -302,7 +278,7 @@ class ActionPolicy:
         if normalized in {"filesystem", "git", "github"} and any(
             word in operation for word in _WRITE_OPERATIONS
         ):
-            if operation in self._GITHUB_OPS:
+            if operation in ALL_GITHUB_OPERATIONS:
                 pass
             else:
                 return PolicyDecision(False, "blocked", "Mutating MCP operations are prohibited.")

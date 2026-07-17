@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.11 (2026-07-17)
+
+### Fixed
+- Policy/action coverage is now derived from a single source of truth (`pm_agent.domain.actions.GITHUB_ACTIONS`) shared by both the policy engine and the integration executor, so a supported action can never be rejected by policy and there is no silent drift between the two.
+- Every built-in GitHub action (reads, writes, auth) is accepted by policy when its arguments are valid. Unsupported operations are rejected with an explicit "Unknown GitHub operation" message listing the supported set.
+- `update_milestone` and `update_issue` now require and validate the exact milestone/issue number (`milestone.number`/`milestone_number` or `issue.number`/`issue_number`) at the policy layer, not only at dispatch time, so missing identifiers fail early with a clear message instead of passing policy and failing later.
+- Policy errors now clearly distinguish unknown operations, disallowed operations, and missing/invalid parameters.
+
+### Added
+- `pm_agent.domain.actions`: a provider-agnostic capability model (`Capability`) and a GitHub action registry. Each action declares the capabilities it needs (e.g. `read_projects`, `write_milestones`, `write_issues`).
+- Integration permission preflight: before executing a GitHub action, the host reads granted token scopes from `gh auth status` and verifies the required capabilities. Missing capabilities produce a clear, user-action-required failure (`error_category="missing_scope"`) with the exact `gh auth refresh -s <scopes>` command — never an agent self-repair loop.
+- Runtime 401/403/permission failures are classified as `missing_scope` so the REPL halts and asks the user to fix credentials instead of retrying forever.
+- Tests: registry/capability model, full policy coverage for every registered action, unknown/malformed rejection, milestone/issue number validation, and integration permission preflight (sufficient vs missing scopes, 401/403 classification, no infinite recovery).
+
+### Changed
+- `update_milestone`/`update_issue` canonical payloads in `prompts/system.md` now document the required `number` field.
+
 ## 0.3.10 (2026-07-17)
 
 ### Fixed
