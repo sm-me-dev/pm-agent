@@ -9,7 +9,7 @@ from rich.panel import Panel
 
 from pm_agent.application.action_service import ActionService
 from pm_agent.application.context_service import ContextService
-from pm_agent.application.conversation_service import ConversationService
+from pm_agent.application.conversation_service import ConnectionError, ConversationService
 from pm_agent.application.decision_service import DecisionService
 from pm_agent.application.error_logger import ErrorLogger
 from pm_agent.application.integration_service import IntegrationService
@@ -205,6 +205,18 @@ class PMAgentREPL:
                         border_style="yellow",
                     )
                 )
+                return
+            except ConnectionError as exc:
+                self.console.print(
+                    Panel(
+                        f"Connection to model failed: {exc}\n\n"
+                        "This is typically a temporary network or server issue. "
+                        "Please check your connection and try again.",
+                        title="Model Connection Error",
+                        border_style="red",
+                    )
+                )
+                self._log_orchestration_error(exc, retryable=True, category="model_connection_error")
                 return
             except Exception as exc:
                 self.console.print(f"[bold red]Request failed:[/] {exc}")
@@ -434,15 +446,15 @@ class PMAgentREPL:
             category=category,
         )
 
-    def _log_orchestration_error(self, exception: BaseException) -> None:
+    def _log_orchestration_error(self, exception: BaseException, retryable: bool = True, category: str = "orchestration_error") -> None:
         if self._error_logger is None:
             return
         self._error_logger.log_failure(
             session_id=self.session.id,
             error=str(exception),
             exception=exception,
-            category="orchestration_error",
-            retryable=True,
+            category=category,
+            retryable=retryable,
             user_message=f"Unexpected error: {exception}",
         )
 

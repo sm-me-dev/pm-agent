@@ -9,6 +9,10 @@ from pm_agent.ports.model import ModelEventHandler, ModelRequest
 from pm_agent.prompts.parser import ResponseValidationError
 
 
+class ConnectionError(Exception):
+    pass
+
+
 class ConversationService:
     def __init__(
         self,
@@ -50,20 +54,27 @@ class ConversationService:
             messages=self.prompt_builder.build(project, session.branch, packet, user_input),
             response_schema=schema,
         )
-        result = self._generate(request, on_model_event)
+        try:
+            result = self._generate(request, on_model_event)
+        except ConnectionError as exc:
+            raise ConnectionError(f"Model connection failed: {exc}") from exc
+
         try:
             response = self.parser.parse(result.content)
         except ResponseValidationError as first_error:
-            repair = self._generate(
-                ModelRequest(
-                    messages=self.prompt_builder.repair_messages(
-                        result.content, str(first_error), schema
+            try:
+                repair = self._generate(
+                    ModelRequest(
+                        messages=self.prompt_builder.repair_messages(
+                            result.content, str(first_error), schema
+                        ),
+                        response_schema=schema,
+                        temperature=0.0,
                     ),
-                    response_schema=schema,
-                    temperature=0.0,
-                ),
-                on_model_event,
-            )
+                    on_model_event,
+                )
+            except ConnectionError as exc:
+                raise ConnectionError(f"Model connection failed during repair: {exc}") from exc
             response = self.parser.parse(repair.content)
 
         stored_actions = []
