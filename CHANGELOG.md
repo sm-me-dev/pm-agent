@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.6 (2026-07-17)
+
+### Fixed
+- Fix mypy type error in `load_env_file` caused by 0.3.5 release.
+
 ## 0.3.5 (2026-07-17)
 
 ### Fixed
