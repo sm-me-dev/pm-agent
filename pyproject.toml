@@ -8,8 +8,8 @@ version = "0.3.0"
 description = "Stateful Technical PM Agent — multi-project CLI with persistent per-project context"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
-authors = [{ name = "sm-me-uwe" }]
+license = "MIT"
+authors = [{ name = "Sm_mE", email = "mohammad79eshrati@gmail.com" }]
 keywords = ["ai", "agent", "pm", "orchestrator", "llm", "project-management"]
 classifiers = [
     "Development Status :: 3 - Alpha",
