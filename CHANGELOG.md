@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 (2026-07-17)
+
+### Fixed
+- `pm-agent --help` now shows available subcommands instead of legacy parser.
+
 ## 0.3.0 (2026-07-17) — First Public Release
 
 ### Overview

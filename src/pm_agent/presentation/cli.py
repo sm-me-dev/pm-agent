@@ -32,9 +32,6 @@ from pm_agent.project import (
 )
 from pm_agent.prompts import PromptBuilder, ResponseParser
 
-_COMMANDS = frozenset({"init", "repl", "status", "doctor", "spec", "memory", "migrate"})
-
-
 def _print_err(msg: str) -> None:
     Console(stderr=True).print(f"[bold red]error:[/] {msg}")
 
@@ -44,32 +41,51 @@ def _die(msg: str, code: int = 1) -> None:
     raise SystemExit(code)
 
 
+def _print_help(parser: argparse.ArgumentParser) -> None:
+    parser.print_help()
+    print()
+    print("commands:")
+    for cmd, info in COMMAND_HELP.items():
+        print(f"  {cmd:<12} {info}")
+
+
+COMMAND_HELP: dict[str, str] = {
+    "init": "Initialize .pm-agent/ in a project",
+    "repl": "Start the interactive REPL",
+    "status": "Show project state and active config",
+    "doctor": "Check environment, config, and permissions",
+    "spec": "Manage project specification (spec show)",
+    "memory": "Manage project memory (memory show/add)",
+    "migrate": "Import legacy global DB into .pm-agent/state.db",
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     load_env_file()
     argv = argv or sys.argv[1:]
 
-    if argv and argv[0] in _COMMANDS:
-        cmd, *rest = argv
-        return _dispatch_command(cmd, rest)
-    return _legacy_main(argv)
+    if not argv or argv[0] in {"-h", "--help"}:
+        _print_help(argparse.ArgumentParser(prog="pm-agent", add_help=False))
+        return 0
 
+    cmd = argv[0]
+    rest = argv[1:]
 
-def _dispatch_command(cmd: str, args: list[str]) -> int:
     if cmd == "init":
-        return _cmd_init(args)
+        return _cmd_init(rest)
     elif cmd == "repl":
-        return _cmd_repl(args)
+        return _cmd_repl(rest)
     elif cmd == "status":
-        return _cmd_status(args)
+        return _cmd_status(rest)
     elif cmd == "doctor":
-        return _cmd_doctor(args)
+        return _cmd_doctor(rest)
     elif cmd == "spec":
-        return _cmd_spec(args)
+        return _cmd_spec(rest)
     elif cmd == "memory":
-        return _cmd_memory(args)
+        return _cmd_memory(rest)
     elif cmd == "migrate":
-        return _cmd_migrate(args)
-    return 1
+        return _cmd_migrate(rest)
+    return _legacy_main(argv)
 
 
 def _build_common_parser() -> argparse.ArgumentParser:
